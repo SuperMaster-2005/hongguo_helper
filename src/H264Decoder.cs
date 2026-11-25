@@ -105,7 +105,7 @@ namespace HongguoRemote
             readonly Action<string> error;
             readonly Timer writeWatchdog;
             const int WriteTimeoutMilliseconds=5000;
-            long writeStarted;
+            long writeStarted,backlogStarted;
             bool writing;
             volatile bool writeTimedOut;
             volatile bool closed;
@@ -120,7 +120,17 @@ namespace HongguoRemote
             }
             public void Push(EncodedFrame frame)
             {
-                lock(sync){if(closed)return;timestamps.Enqueue(frame.Timestamp);writeStarted=Stopwatch.GetTimestamp();writing=true;}
+                lock(sync){
+                    if(closed)return;
+                    // The pipe can accept frames faster than FFmpeg outputs them; bound that hidden backlog too.
+                    if(timestamps.Count>=18 || (timestamps.Count>0 && frame.Timestamp-timestamps.Peek()>180000)){
+                        long now=Stopwatch.GetTimestamp();
+                        if(backlogStarted==0)backlogStarted=now;
+                        else if((now-backlogStarted)*1000.0/Stopwatch.Frequency>=1000)
+                            throw new IOException("视频解码持续积压，重新等待关键帧。");
+                    }else backlogStarted=0;
+                    timestamps.Enqueue(frame.Timestamp);writeStarted=Stopwatch.GetTimestamp();writing=true;
+                }
                 try{process.StandardInput.BaseStream.Write(frame.Data,0,frame.Data.Length);process.StandardInput.BaseStream.Flush();}
                 catch(Exception){if(writeTimedOut)throw new TimeoutException("视频解码器写入超时。");throw;}
                 finally{lock(sync)writing=false;}

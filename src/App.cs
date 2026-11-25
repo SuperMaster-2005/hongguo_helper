@@ -71,6 +71,8 @@ namespace HongguoRemote
         readonly object decodedLock=new object();
         readonly Queue<DecodedFrame> decoded=new Queue<DecodedFrame>();
         WriteableBitmap videoBitmap;
+        DecodedFrame pendingVideoFrame;
+        TimeSpan lastVideoRenderingTime=TimeSpan.MinValue;
         readonly Stopwatch playbackStats=Stopwatch.StartNew();
         int shownFrames,receivedFrames,decodedFrames;
         long statsWindows;
@@ -246,7 +248,7 @@ namespace HongguoRemote
             session.VideoFormatChanged=format=>{
                 Ui(()=>Log("收到视频格式 "+format.Width+"×"+format.Height+" @ "+format.Fps));
                 decoder.Configure(format);
-                Ui(()=>{if(companion==session){lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}videoBitmap=null;Text("VideoStats","H.264 · "+format.Width+"×"+format.Height+" · 目标 "+format.Fps+" 帧");}});
+                Ui(()=>{if(companion==session){lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}if(pendingVideoFrame!=null){pendingVideoFrame.Dispose();pendingVideoFrame=null;}videoBitmap=null;Text("VideoStats","H.264 · "+format.Width+"×"+format.Height+" · 目标 "+format.Fps+" 帧");}});
             };
             session.Video=frame=>{if(contentVisible){System.Threading.Interlocked.Increment(ref receivedFrames);timeline.Observe(frame.Timestamp);decoder.Enqueue(frame);}};
             session.TimedAudio=(timestamp,data)=>{if(contentVisible)audioPlayback.Add(timestamp,data);};
@@ -256,7 +258,7 @@ namespace HongguoRemote
                 lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}
                 Ui(()=>{if(companion!=session || contentVisible!=visible)return;
                     shownFrames=0;System.Threading.Interlocked.Exchange(ref receivedFrames,0);System.Threading.Interlocked.Exchange(ref decodedFrames,0);statsWindows=0;lastSubmit=0;skippedVideoFrames=busyVideoFrames=0;submitMilliseconds=maxSubmitMilliseconds=maxSubmitGap=0;playbackStats.Restart();
-                    videoBitmap=null; Get<System.Windows.Controls.Image>("CompanionImage").Source=null;
+                    if(pendingVideoFrame!=null){pendingVideoFrame.Dispose();pendingVideoFrame=null;}videoBitmap=null; Get<System.Windows.Controls.Image>("CompanionImage").Source=null;
                     Get<System.Windows.Controls.Image>("CompanionImage").Visibility=visible?Visibility.Visible:Visibility.Collapsed;
                     Get<StackPanel>("EmptyState").Visibility=visible?Visibility.Collapsed:Visibility.Visible;
                     Text("EmptyTitle","等待手机端打开红果短剧");Text("EmptyHint","连接已保留，打开红果后自动恢复播放");
@@ -301,15 +303,18 @@ namespace HongguoRemote
         void RenderVideo(object sender,EventArgs e)
         {
             if(companion==null||!companion.Connected||!contentVisible||mediaClock==null)return;
-            DecodedFrame frame=null;
+            var rendering=e as System.Windows.Media.RenderingEventArgs;
+            // WPF may raise multiple callbacks for the same composition frame.
+            if(rendering!=null){if(rendering.RenderingTime==lastVideoRenderingTime)return;lastVideoRenderingTime=rendering.RenderingTime;}
+            DecodedFrame frame=pendingVideoFrame; pendingVideoFrame=null;
             lock(decodedLock){while(decoded.Count>0&&mediaClock.Delay(decoded.Peek().Timestamp)<=3){if(frame!=null){frame.Dispose();skippedVideoFrames++;}frame=decoded.Dequeue();}}
             if(frame!=null){
                 try{
                     if(mediaClock.Delay(frame.Timestamp)>=-150){
                         if(videoBitmap==null||videoBitmap.PixelWidth!=frame.Width||videoBitmap.PixelHeight!=frame.Height){videoBitmap=new WriteableBitmap(frame.Width,frame.Height,96,96,System.Windows.Media.PixelFormats.Bgr32,null);Get<System.Windows.Controls.Image>("CompanionImage").Source=videoBitmap;}
                         long submitStarted=Stopwatch.GetTimestamp();
-                        // Skip a busy compositor instead of blocking the UI and accumulating stale frames.
-                        if(videoBitmap.TryLock(new Duration(TimeSpan.Zero))){
+                        // Bound UI waiting; retain the newest due frame if the compositor is still busy.
+                        if(videoBitmap.TryLock(new Duration(TimeSpan.FromMilliseconds(2)))){
                             try{
                                 int stride=frame.Width*4;
                                 if(videoBitmap.BackBufferStride==stride)System.Runtime.InteropServices.Marshal.Copy(frame.Pixels,0,videoBitmap.BackBuffer,frame.Pixels.Length);
@@ -320,9 +325,9 @@ namespace HongguoRemote
                             }finally{videoBitmap.Unlock();}
                             double elapsed=(Stopwatch.GetTimestamp()-submitStarted)*1000.0/Stopwatch.Frequency;
                             submitMilliseconds+=elapsed;maxSubmitMilliseconds=Math.Max(maxSubmitMilliseconds,elapsed);
-                        }else busyVideoFrames++;
+                        }else {busyVideoFrames++;pendingVideoFrame=frame;frame=null;}
                     }else skippedVideoFrames++;
-                }finally{frame.Dispose();}
+                }finally{if(frame!=null)frame.Dispose();}
             }
             if(playbackStats.ElapsedMilliseconds>=1000){
                 double seconds=playbackStats.Elapsed.TotalSeconds;
@@ -590,7 +595,7 @@ namespace HongguoRemote
             if(h264!=null){h264.Dispose();h264=null;}
             if(timedAudio!=null){timedAudio.Dispose();timedAudio=null;}
             lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}
-            videoBitmap=null;mediaClock=null;
+            if(pendingVideoFrame!=null){pendingVideoFrame.Dispose();pendingVideoFrame=null;}videoBitmap=null;mediaClock=null;
             if(pcm!=null) {pcm.Dispose();pcm=null;}
             System.Threading.Interlocked.Exchange(ref framePending,0);
             video = IntPtr.Zero; embedded = false;
