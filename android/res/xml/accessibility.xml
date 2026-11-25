@@ -1,0 +1,5 @@
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+ android:description="@string/accessibility_description" android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged" android:accessibilityFlags="flagRetrieveInteractiveWindows"
+ android:accessibilityFeedbackType="feedbackGeneric" android:notificationTimeout="0"
+ android:canPerformGestures="true" android:canRetrieveWindowContent="true"
+ android:settingsActivity="local.hongguo.companion.MainActivity"/>

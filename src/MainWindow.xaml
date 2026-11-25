@@ -1,0 +1,230 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="红果遥控端" Width="1180" Height="780" MinWidth="620" MinHeight="440"
+ WindowStartupLocation="CenterScreen" Background="#0E0F14" Foreground="#F2F3F6" FontFamily="Microsoft YaHei UI" FontSize="13" UseLayoutRounding="True" SnapsToDevicePixels="True">
+ <Window.Resources>
+  <SolidColorBrush x:Key="AccentBrush" Color="#F04458"/>
+  <SolidColorBrush x:Key="AccentHoverBrush" Color="#F45A70"/>
+  <SolidColorBrush x:Key="AccentPressBrush" Color="#D13A50"/>
+
+  <Style TargetType="Button">
+   <Setter Property="Foreground" Value="#E8EAF2"/><Setter Property="Background" Value="#23252F"/>
+   <Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="#2E303C"/>
+   <Setter Property="Padding" Value="14,10"/><Setter Property="Margin" Value="0,0,0,8"/>
+   <Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+     BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border><ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bg" Property="Background" Value="#2C2E3A"/><Setter TargetName="Bg" Property="BorderBrush" Value="#3D4050"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bg" Property="BorderBrush" Value="#F18A98"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bg" Property="Background" Value="#1C1E27"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bg" Property="Opacity" Value="0.35"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+   <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="#F04458"/>
+   <Setter Property="BorderBrush" Value="#F04458"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+     BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border><ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bg" Property="Background" Value="#F45A70"/><Setter TargetName="Bg" Property="BorderBrush" Value="#F45A70"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bg" Property="Background" Value="#D13A50"/><Setter TargetName="Bg" Property="BorderBrush" Value="#D13A50"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bg" Property="Opacity" Value="0.35"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+
+  <Style TargetType="TextBox">
+   <Setter Property="Background" Value="#1B1D26"/><Setter Property="Foreground" Value="#F2F3F6"/>
+   <Setter Property="CaretBrush" Value="#F2F3F6"/><Setter Property="BorderBrush" Value="#333644"/>
+   <Setter Property="Padding" Value="10,8"/><Setter Property="Margin" Value="0,5,0,10"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+     <ScrollViewer x:Name="PART_ContentHost" Margin="1,0"/></Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#F04458"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#474B5E"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="PasswordBox">
+   <Setter Property="Background" Value="#1B1D26"/><Setter Property="Foreground" Value="#F2F3F6"/>
+   <Setter Property="CaretBrush" Value="#F2F3F6"/><Setter Property="BorderBrush" Value="#333644"/>
+   <Setter Property="Padding" Value="10,8"/><Setter Property="Margin" Value="0,5,0,10"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="PasswordBox">
+    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+     <ScrollViewer x:Name="PART_ContentHost" Margin="1,0"/></Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#F04458"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#474B5E"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+
+  <Style TargetType="ComboBox">
+   <Setter Property="Background" Value="#1B1D26"/><Setter Property="Foreground" Value="#F2F3F6"/>
+   <Setter Property="BorderBrush" Value="#333644"/><Setter Property="Margin" Value="0,0,0,8"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+    <Grid>
+     <ToggleButton x:Name="ToggleButton" Focusable="False" ClickMode="Press"
+      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}">
+      <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
+       <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+        <Path x:Name="Arrow" Data="M0,0 L5,5 L10,0 Z" Fill="#9A9EAE" Width="10" Height="6" Stretch="None" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"/>
+       </Border>
+       <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#474B5E"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="#F04458"/></Trigger>
+        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Bd" Property="Opacity" Value="0.4"/></Trigger>
+       </ControlTemplate.Triggers>
+      </ControlTemplate></ToggleButton.Template>
+     </ToggleButton>
+     <ContentPresenter IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="12,0,30,0" VerticalAlignment="Center"/>
+     <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+      <Border Background="#22242F" BorderBrush="#3A3D4D" BorderThickness="1" CornerRadius="8" Padding="3"
+       MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="320" Margin="0,4,0,0">
+       <ScrollViewer SnapsToDevicePixels="True" VerticalScrollBarVisibility="Auto">
+        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+       </ScrollViewer>
+      </Border>
+     </Popup>
+    </Grid>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ComboBoxItem">
+   <Setter Property="Foreground" Value="#E8EAF2"/><Setter Property="Padding" Value="10,8"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+    <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+     <ContentPresenter VerticalAlignment="Center"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Bd" Property="Background" Value="#353849"/></Trigger>
+     <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="#46303A"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+
+  <Style TargetType="CheckBox"><Setter Property="Margin" Value="0,8,0,8"/><Setter Property="Foreground" Value="#E4E5ED"/></Style>
+  <Style TargetType="Expander"><Setter Property="Foreground" Value="#E4E5ED"/></Style>
+  <Style TargetType="ToolTip"><Setter Property="Background" Value="#22242F"/><Setter Property="Foreground" Value="#E8EAF2"/><Setter Property="BorderBrush" Value="#3A3D4D"/><Setter Property="Padding" Value="8,5"/></Style>
+  <Style x:Key="Hint" TargetType="TextBlock"><Setter Property="Foreground" Value="#8B90A2"/>
+   <Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="21"/></Style>
+ </Window.Resources>
+ <Grid>
+  <Grid.RowDefinitions><RowDefinition Height="68"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+  <Border x:Name="Header" Background="#13141B" Padding="24,0" BorderThickness="0,0,0,1" BorderBrush="#20222C">
+   <DockPanel VerticalAlignment="Center">
+    <Border DockPanel.Dock="Right" VerticalAlignment="Center" Background="#1B1D27" CornerRadius="14" Padding="12,6" BorderThickness="1" BorderBrush="#262933">
+     <StackPanel Orientation="Horizontal">
+      <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#5B6070" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <TextBlock MaxWidth="220" TextTrimming="CharacterEllipsis" x:Name="ConnectionStatus" Text="等待连接手机" Foreground="#C1C6D4" FontSize="12" VerticalAlignment="Center"/>
+     </StackPanel>
+    </Border>
+    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+     <Border CornerRadius="11" Width="38" Height="38" Margin="0,0,12,0">
+      <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+       <GradientStop Color="#F2546C" Offset="0"/><GradientStop Color="#C92647" Offset="1"/>
+      </LinearGradientBrush></Border.Background>
+      <TextBlock Text="▶" FontSize="17" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+     </Border>
+     <StackPanel VerticalAlignment="Center">
+      <TextBlock Text="红果遥控端" FontSize="19" FontWeight="SemiBold"/>
+      <TextBlock Text="手机上的红果 · 电脑上的观看体验" Foreground="#7E8496" FontSize="11" Margin="0,1,0,0"/>
+     </StackPanel>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+
+  <Grid Grid.Row="1" x:Name="Body">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="280"/><ColumnDefinition Width="*"/><ColumnDefinition Width="0"/></Grid.ColumnDefinitions>
+   <Border x:Name="LeftPanel" Background="#13141B" Padding="18,16" BorderThickness="0,0,1,0" BorderBrush="#20222C">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+     <TextBlock Text="连接你的手机" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"/>
+     <TextBlock Style="{StaticResource Hint}" Text="电脑已连接手机热点？直接点下面的按钮，无需填写地址。" Margin="0,0,0,10"/>
+     <Button x:Name="AutoFind" Content="查找并连接手机" Style="{StaticResource AccentButton}"/>
+     <TextBlock x:Name="DiscoveryHint" Style="{StaticResource Hint}" Text="手机打开「红果手机助手」，点击开始共享。无需 USB、无线调试或填写地址。"/>
+     <ComboBox x:Name="CompanionChoices" Visibility="Collapsed" Height="36" Margin="0,8,0,8"/>
+     <StackPanel x:Name="AutoPairPanel" Visibility="Collapsed" Margin="0,10,0,0">
+      <ComboBox x:Name="WirelessChoices" Height="36" Margin="0,0,0,8"/>
+      <TextBlock x:Name="AutoCodeLabel" Text="输入手机显示的 6 位配对码" Foreground="#C1C6D4"/>
+      <PasswordBox x:Name="AutoCode" MaxLength="6"/>
+      <Button x:Name="AutoPair" Content="配对并连接" Style="{StaticResource AccentButton}"/>
+     </StackPanel>
+     <Button x:Name="Start" Content="开始投屏" Style="{StaticResource AccentButton}" Margin="0,12,0,8" FontWeight="SemiBold"/>
+     <Button x:Name="Stop" Content="结束投屏" IsEnabled="False"/>
+     <Border Height="1" Background="#20222C" Margin="0,14"/>
+     <Expander x:Name="Wireless" Header="高级连接（通常不用打开）">
+      <StackPanel Margin="0,12,0,0">
+       <TextBlock Text="USB / 调试设备" Foreground="#8B90A2"/>
+       <ComboBox x:Name="Devices" Height="36" Margin="0,8,0,10"/>
+       <Button x:Name="Refresh" Content="刷新调试设备"/>
+       <Button x:Name="FindAdb" Content="使用原来的无线调试连接"/>
+       <TextBlock Style="{StaticResource Hint}" Text="自动发现失败时才需要手动填写。USB 连接需开启手机 USB 调试、接上数据线，并在手机上允许这台电脑。"/>
+       <TextBlock Text="配对地址（配对码弹窗）" Margin="0,12,0,0" Foreground="#C1C6D4"/>
+       <TextBox x:Name="PairAddress" ToolTip="例如 192.168.1.8:37123"/>
+       <TextBlock Text="6 位配对码" Foreground="#C1C6D4"/><PasswordBox x:Name="PairCode" MaxLength="6"/>
+       <Button x:Name="Pair" Content="配对手机"/>
+       <TextBlock Text="连接地址（无线调试主页面）" Margin="0,8,0,0" Foreground="#C1C6D4"/>
+       <TextBox x:Name="ConnectAddress" ToolTip="例如 192.168.1.8:40567；与配对端口通常不同"/>
+       <Button x:Name="Connect" Content="连接无线设备"/>
+       <TextBlock Style="{StaticResource Hint}" Text="没有无线调试？先用 USB 连接并选中设备，再开启 USB 转无线。连接地址填手机在当前网络的 IP:5555。热点地址可在电脑网络详情的默认网关中查看。"/>
+       <Button x:Name="EnableTcp" Content="USB 转无线（端口 5555）" Margin="0,10,0,8"/>
+       <Button x:Name="RestoreUsb" Content="关闭 5555，恢复 USB 模式"/>
+      </StackPanel>
+     </Expander>
+     <Border Height="1" Background="#20222C" Margin="0,14"/>
+     <Expander Header="画质与声音"><StackPanel>
+     <ComboBox x:Name="Quality" SelectedIndex="0" Height="34" Margin="0,10,0,0"><ComboBoxItem Content="流畅 · 1280 / 4 Mbps"/><ComboBoxItem Content="清晰 · 1920 / 8 Mbps"/></ComboBox>
+     <CheckBox x:Name="Audio" Content="USB / 调试模式转发声音" IsChecked="True"/>
+     <TextBlock Style="{StaticResource Hint}" Text="清晰度档位用于 USB / 调试模式；手机助手优先 60 帧并尽量保留原画尺寸。手机静音转发时，请用电脑系统音量调节。"/>
+     </StackPanel></Expander>
+     <CheckBox x:Name="WatchMode" Content="启用画面内键盘操作" IsChecked="True"/>
+     <Button x:Name="Help" Content="使用说明与诊断" Margin="0,16,0,8"/>
+    </StackPanel></ScrollViewer>
+   </Border>
+   <Grid Grid.Column="1" x:Name="PlayerArea" Margin="8">
+    <Border Background="#08090D" CornerRadius="14" BorderThickness="1" BorderBrush="#1D1F29"/>
+    <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="360" Margin="26">
+     <Border Width="76" Height="120" CornerRadius="18" BorderThickness="2" BorderBrush="#333647" Background="#101118" HorizontalAlignment="Center" Margin="0,0,0,20">
+      <Border Width="42" Height="42" CornerRadius="21" Background="#26F04458">
+       <TextBlock Text="▶" FontSize="17" Foreground="#F2546C" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+     </Border>
+     <TextBlock x:Name="EmptyTitle" Text="把手机里的故事，搬到大屏" FontSize="21" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"/>
+     <TextBlock x:Name="EmptyHint" Text="手机助手开始共享 → 电脑查找并连接&#10;手机允许本次连接" Style="{StaticResource Hint}" TextAlignment="Center" Margin="0,14,0,0"/>
+     <TextBlock Text="手机播放 · 电脑观看" Foreground="#5F6578" FontSize="12" TextAlignment="Center" Margin="0,22,0,0"/>
+    </StackPanel>
+    <Border x:Name="VideoHost" Visibility="Collapsed"/>
+    <Image x:Name="CompanionImage" Stretch="Uniform" Focusable="True" Visibility="Collapsed" Cursor="Hand"/>
+   </Grid>
+
+  </Grid>
+  <Border x:Name="Footer" Grid.Row="2" Background="#13141B" Padding="16,10" BorderThickness="0,1,0,0" BorderBrush="#20222C">
+   <StackPanel>
+    <WrapPanel x:Name="Toolbar" VerticalAlignment="Center">
+     <Button x:Name="ConnectionToggle" Content="连接与设置" Margin="0,0,8,0"/>
+     <Button x:Name="Pause" Content="播放 / 暂停" Margin="0,0,8,0"/>
+     <Button x:Name="Back" Content="返回" Margin="0,0,8,0"/>
+     <Button x:Name="SendText" Content="输入文字" Margin="0,0,8,0"/>
+     <Button x:Name="Fullscreen" Content="全屏  F11" Style="{StaticResource AccentButton}" Margin="0"/>
+    </WrapPanel>
+    <DockPanel Margin="0,8,0,0">
+     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+      <TextBlock x:Name="VideoStats" Text="高清 · 优先 60 帧" Foreground="#8B90A2" FontSize="11" Margin="12,0"/>
+      <TextBlock x:Name="PlaybackFps" Text="等待画面" Foreground="#8B90A2" FontSize="11"/>
+     </StackPanel>
+     <TextBlock x:Name="Status" Text="打开手机助手，开始连接" Foreground="#8B90A2" TextTrimming="CharacterEllipsis"/>
+    </DockPanel>
+   </StackPanel>
+  </Border>
+  <Popup x:Name="ExitFullPopup" Placement="Relative" VerticalOffset="12" AllowsTransparency="True" StaysOpen="True" Focusable="False">
+   <Button x:Name="ExitFull" Content="退出全屏 · Esc" Visibility="Collapsed" Padding="12,8" Margin="0" Opacity="0.85"/>
+  </Popup>
+ </Grid>
+</Window>

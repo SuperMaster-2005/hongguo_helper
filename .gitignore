@@ -1,0 +1,15 @@
+bin/
+tools/
+*.log
+tests/out/
+android/build/
+.workbuddy/
+.env
+.env.*
+*.p12
+*.jks
+*.keystore
+*.pem
+*.key
+__pycache__/
+assets/preview-*.png
