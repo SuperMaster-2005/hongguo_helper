@@ -10,11 +10,11 @@ Windows + 安卓的本地投屏遥控工具。红果仍在手机运行，优先�
 
 Required Notice: Copyright 2026 SuperMaster-2005
 
-许可证适用于本项目自身代码和资源；Android SDK、scrcpy、ADB、FFmpeg 等第三方组件遵循各自的许可证，不因本项目许可证而改变。本项目未附带这些第三方二进制文件，也不附带本地 APK 签名私钥。
+许可证适用于本项目自身代码和资源；Android SDK、scrcpy、ADB、FFmpeg 等第三方组件遵循各自的许可证，不因本项目许可证而改变。仓库附带运行所需的 FFmpeg、scrcpy、ADB 及配套组件，第三方许可证保留在对应 tools 子目录；不附带 Android SDK 和 APK 签名私钥。FFmpeg 7.1 来自 [Gyan 官方发行](https://github.com/GyanD/codexffmpeg/releases/tag/7.1)，采用 GPL v3，构建配置与源码链接见 tools/ffmpeg/README.txt。
 
 ## 启动
 
-双击 `启动红果遥控端.cmd`，或打开 `bin/HongguoRemote.exe`。保留整个项目文件夹，不要单独移动 exe。Windows 10/11 x64，需要 .NET Framework 4.8。
+从 GitHub 克隆仓库或下载并解压完整 ZIP 后，无需编译或手动补运行依赖。双击 `启动红果遥控端.cmd`，或打开 `bin/HongguoRemote.exe`。保留整个项目文件夹，不要单独移动 exe。Windows 10/11 x64，需要 .NET Framework 4.8。
 
 下载或更新项目后，首次双击 `启动红果遥控端.cmd`，或成功运行 `build.ps1`，会自动创建／更新当前用户桌面的「红果遥控端」快捷方式，指向当前目录的 `bin/HongguoRemote.exe`。之后可直接从桌面启动。移动项目后重新双击启动脚本即可更新路径。仅下载、解压或执行 Git 拉取不会自动创建；直接打开 exe 也不会创建。快捷方式创建失败会显示警告，不影响已有程序启动或构建结果。
 
@@ -100,7 +100,7 @@ Required Notice: Copyright 2026 SuperMaster-2005
 
 ## 编译与检查
 
-GitHub 仓库提供源码，`bin/`、`tools/`、构建缓存和测试临时产物不提交。首次克隆后需准备 Java 17、[官方 Android SDK](https://developer.android.com/tools) 的 API 35 与 Build Tools 35，以及 [FFmpeg](https://ffmpeg.org/download.html) 的 Windows 构建。按当前脚本约定，将 API 35 的 `android.jar` 放在 `tools/android-sdk/android-35/android.jar`，将 Build Tools 35 解压内容放在 `tools/android-sdk/android-15/`，FFmpeg 可执行文件放在 `tools/ffmpeg/ffmpeg.exe`。原调试模式另需按文末说明准备 scrcpy。首次安卓构建会生成本机签名；后续更新需自行妥善保管同一签名文件，不应提交到公开仓库。
+GitHub 仓库提供源码、当前 EXE/APK 和运行依赖；直接使用无需开发工具。只有重新编译安卓端才需准备 Java 17、[官方 Android SDK](https://developer.android.com/tools) 的 API 35 与 Build Tools 35。按当前脚本约定，将 API 35 的 `android.jar` 放在 `tools/android-sdk/android-35/android.jar`，将 Build Tools 35 解压内容放在 `tools/android-sdk/android-15/`。FFmpeg 与 scrcpy 已随仓库提供。首次安卓构建会生成本机签名；后续更新需自行妥善保管同一签名文件，不应提交到公开仓库。
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
@@ -173,7 +173,7 @@ java -cp "tests/out;android/build/classes;tools/android-sdk/android-35/android.j
 
 `b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5`
 
-scrcpy 使用 Apache-2.0 许可证；发行包含 ADB、SDL、FFmpeg 等第三方组件，其许可证各自适用。官方说明：[scrcpy](https://github.com/Genymobile/scrcpy)、[LICENSE](https://github.com/Genymobile/scrcpy/blob/v5.0.1/LICENSE)。当前依赖和编译产物由 `.gitignore` 排除；在其他电脑使用时需同时带上 tools 目录。
+scrcpy 使用 Apache-2.0 许可证；发行包含 ADB、SDL、FFmpeg 等第三方组件，其许可证各自适用。官方说明：[scrcpy](https://github.com/Genymobile/scrcpy)、[LICENSE](https://github.com/Genymobile/scrcpy/blob/v5.0.1/LICENSE)。运行依赖和当前 EXE/APK 已纳入版本管理；开发工具、签名私钥、旧版本和构建缓存继续排除。在其他电脑使用时需保留完整 tools 目录。
 
 ## 验证范围与限制
 

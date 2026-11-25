@@ -1,5 +1,9 @@
-bin/
-tools/
+bin/*
+!bin/HongguoRemote.exe
+!bin/HongguoCompanion.apk
+tools/*
+!tools/ffmpeg/
+!tools/scrcpy-win64-v5.0.1/
 *.log
 tests/out/
 android/build/
