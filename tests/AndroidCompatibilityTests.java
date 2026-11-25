@@ -23,6 +23,13 @@ public final class AndroidCompatibilityTests {
         check(Arrays.equals(RemoteAccessibility.touchBounds(cw,ch,sw,sh,window,root),expected),label);
     }
     public static void main(String[] args) {
+        check(Arrays.equals(VideoEncoder.profileCandidates(new int[]{1,8}),new int[]{8,1,0}),"High precedes Baseline and automatic fallback");
+        check(Arrays.equals(VideoEncoder.profileCandidates(new int[]{1}),new int[]{1,0}),"Baseline-only encoder retains fallback");
+        check(Arrays.equals(VideoEncoder.profileCandidates(new int[]{8}),new int[]{8,0}),"High-only encoder retains automatic fallback");
+        check(Arrays.equals(VideoEncoder.profileCandidates(new int[]{2}),new int[]{0}),"unknown profile uses automatic configuration");
+        check(VideoEncoder.bitrateMode(true,true)==1,"VBR preferred when both modes supported");
+        check(VideoEncoder.bitrateMode(false,true)==2,"CBR used when VBR unavailable");
+        check(VideoEncoder.bitrateMode(false,false)==-1,"unsupported modes left to encoder default");
         VideoQueue queue=new VideoQueue();
         for(int i=0;i<13;i++)queue.offer(new VideoFrame(1080,2400,120,i*8333L,i==0,new byte[1]));
         check(queue.size()==13,"120fps short burst retains dependent frames");

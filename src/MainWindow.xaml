@@ -201,7 +201,7 @@
      <TextBlock Text="手机播放 · 电脑观看" Foreground="#5F6578" FontSize="12" TextAlignment="Center" Margin="0,22,0,0"/>
     </StackPanel>
     <Border x:Name="VideoHost" Visibility="Collapsed"/>
-    <Image x:Name="CompanionImage" Stretch="Uniform" Focusable="True" Visibility="Collapsed" Cursor="Hand"/>
+    <Image x:Name="CompanionImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" Focusable="True" Visibility="Collapsed" Cursor="Hand"/>
    </Grid>
 
   </Grid>

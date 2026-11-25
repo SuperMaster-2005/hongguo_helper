@@ -46,14 +46,19 @@ final class VideoEncoder implements AutoCloseable {
                         if(size==null)continue;
                         int w=size[0],h=size[1];
                         if(!video.areSizeAndRateSupported(w,h,rate))continue;
-                        // Report success only after configure, Surface creation and start all succeed.
-                        try {
-                            return new VideoEncoder(info,w,h,rate,handler,sink,true);
-                        } catch(IOException | RuntimeException e) {
-                            android.util.Log.i("HongguoEncoder","以基本参数重试 "+info.getName(),e);
-                            return new VideoEncoder(info,w,h,rate,handler,sink,false);
+                        int[] supported=new int[caps.profileLevels.length];
+                        for(int i=0;i<supported.length;i++)supported[i]=caps.profileLevels[i].profile;
+                        MediaCodecInfo.EncoderCapabilities encoding=caps.getEncoderCapabilities();
+                        int mode=bitrateMode(encoding.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR),
+                            encoding.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR));
+                        // Retry optional quality settings at the same size before reducing resolution.
+                        for(int profile:profileCandidates(supported)) {
+                            for(int attempt=0;attempt<(profile==0 || mode<0?1:2);attempt++) {
+                                try {return new VideoEncoder(info,w,h,rate,handler,sink,profile,attempt==0&&profile!=0?mode:-1);}
+                                catch(IOException | RuntimeException e){lastFailure=e;android.util.Log.i("HongguoEncoder","重试编码参数 "+info.getName()+" / profile="+profile,e);}
+                            }
                         }
-                    }catch(IOException | RuntimeException e){
+                    }catch(RuntimeException e){
                         lastFailure=e;
                         android.util.Log.w("HongguoEncoder","尝试下一硬件编码配置："+info.getName()+" / "+longEdge+" / "+rate,e);
                     }
@@ -71,7 +76,16 @@ final class VideoEncoder implements AutoCloseable {
         int w=(int)((long)Math.floor(sourceWidth*scale)/aw*aw),h=(int)((long)Math.floor(sourceHeight*scale)/ah*ah);
         return w<64 || h<64?null:new int[]{w,h};
     }
-    private VideoEncoder(MediaCodecInfo selected,int w,int h,int rate,Handler handler,Sink sink,boolean preferred) throws IOException {
+    static int[] profileCandidates(int[] supported) {
+        boolean high=false,baseline=false;
+        for(int profile:supported){if(profile==MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)high=true;if(profile==MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)baseline=true;}
+        int h=MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,b=MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline;
+        return high?(baseline?new int[]{h,b,0}:new int[]{h,0}):(baseline?new int[]{b,0}:new int[]{0});
+    }
+    static int bitrateMode(boolean vbr,boolean cbr) {
+        return vbr?MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR:cbr?MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR:-1;
+    }
+    private VideoEncoder(MediaCodecInfo selected,int w,int h,int rate,Handler handler,Sink sink,int profile,int bitrateMode) throws IOException {
         this.sink=sink;
         width=w;height=h;fps=rate;codecName=selected.getName();
         codec=MediaCodec.createByCodecName(codecName);
@@ -86,16 +100,17 @@ final class VideoEncoder implements AutoCloseable {
 
             format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1);
             format.setInteger(MediaFormat.KEY_MAX_B_FRAMES,0);
-            if(preferred){
+            if(profile!=0){
                 format.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER,(float)fps);
                 format.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER,250000L);
-                for(MediaCodecInfo.CodecProfileLevel profile:selected.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).profileLevels)
-                    if(profile.profile==MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline){format.setInteger(MediaFormat.KEY_PROFILE,profile.profile);break;}
+                format.setInteger(MediaFormat.KEY_PROFILE,profile);
+                if(bitrateMode>=0)format.setInteger(MediaFormat.KEY_BITRATE_MODE,bitrateMode);
             }
             codec.setCallback(new MediaCodec.Callback() {
                 public void onInputBufferAvailable(MediaCodec c,int index){}
                 public void onError(MediaCodec c,MediaCodec.CodecException e){if(!closed)sink.error(e.getMessage());}
                 public void onOutputFormatChanged(MediaCodec c,MediaFormat f){
+                    android.util.Log.i("HongguoEncoder","编码器实际输出格式："+f);
                     ByteArrayOutputStream bytes=new ByteArrayOutputStream();
                     for(String key:new String[]{"csd-0","csd-1"})if(f.containsKey(key)){ByteBuffer b=f.getByteBuffer(key).duplicate();byte[] data=new byte[b.remaining()];b.get(data);bytes.write(data,0,data.length);}
                     config=bytes.toByteArray();
