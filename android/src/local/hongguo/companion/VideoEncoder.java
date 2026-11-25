@@ -20,7 +20,7 @@ final class VideoEncoder implements AutoCloseable {
     static VideoEncoder create(int requestedWidth,int requestedHeight,int maxFps,Handler handler,Sink sink) throws IOException {
         Exception lastFailure=null;
         MediaCodecInfo[] codecs=new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos();
-        for (int rate : new int[]{60,30}) {
+        for (int rate : new int[]{120,90,60,30}) {
             if(rate>maxFps)continue;
             for(int longEdge : new int[]{3200,2560,1920,1280,960}) {
                 int sourceEdge=Math.max(requestedWidth,requestedHeight);

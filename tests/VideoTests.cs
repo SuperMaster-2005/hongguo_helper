@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -14,6 +14,15 @@ static class VideoTests
         CheckDecode(1080,1920);
         CheckDecode(2560,1440);
         CheckDecode(1440,2560);
+        CheckDecode(1920,1080,90);
+        CheckDecode(1080,2400,90);
+        CheckDecode(2400,1080,90);
+        CheckDecode(1920,1080,120);
+        CheckDecode(722,1280,60,true);
+        CheckDecode(1080,2400,120);
+        CheckDecode(2400,1080,120);
+        bool invalidRate=false;try {VideoFormat.Parse("H264|1280|720|144");}catch(IOException){invalidRate=true;}
+        if(!invalidRate)throw new Exception("Unsupported frame rate accepted");
         bool rejected=false;
         try { VideoFormat.Parse("H264|1920|1920|60"); } catch(IOException) { rejected=true; }
         if(!rejected)throw new Exception("Oversized format accepted");
@@ -61,11 +70,11 @@ static class VideoTests
         }
         Console.WriteLine("PASS: stalled decoder write times out, restarts at keyframe, delivers frame and cleans up");
     }
-    static void CheckDecode(int width,int height)
+    static void CheckDecode(int width,int height,int fps=60,bool solidRed=false)
     {
         string exe = Path.GetFullPath("tools/ffmpeg/ffmpeg.exe");
         string sample = Path.GetFullPath("tests/out/sample60.h264");
-        var info = new ProcessStartInfo(exe, "-hide_banner -loglevel error -y -f lavfi -i testsrc2=size="+width+"x"+height+":rate=60 -frames:v 120 -c:v libx264 -preset ultrafast -tune zerolatency -x264-params aud=1:keyint=60:scenecut=0 -f h264 " + ProcessRunner.Quote(sample)) { UseShellExecute=false, CreateNoWindow=true };
+        var info = new ProcessStartInfo(exe, "-hide_banner -loglevel error -y -f lavfi -i "+(solidRed?"color=c=red:size=":"testsrc2=size=")+width+"x"+height+":rate="+fps+" -frames:v 120 -c:v libx264 -preset ultrafast -tune zerolatency -x264-params aud=1:keyint=60:scenecut=0 -f h264 " + ProcessRunner.Quote(sample)) { UseShellExecute=false, CreateNoWindow=true };
         using(var generator=Process.Start(info)) {
             if(!generator.WaitForExit(15000) || generator.ExitCode!=0) throw new Exception("H264 fixture generation failed");
         }
@@ -80,19 +89,20 @@ static class VideoTests
             decoder.Error=message=>error=message;
             decoder.Frame=frame=>{
                 if(frame.Width!=width || frame.Height!=height || frame.Pixels.Length!=width*height*4) error="Invalid decoded dimensions";
+                if(solidRed && (frame.Pixels[0]>10 || frame.Pixels[1]>10 || frame.Pixels[2]<240))error="BGR32 color channels invalid";
                 frame.Dispose();Interlocked.Increment(ref frames);
             };
-            decoder.Configure(VideoFormat.Parse("H264|"+width+"|"+height+"|60"));
+            decoder.Configure(VideoFormat.Parse("H264|"+width+"|"+height+"|"+fps));
             var elapsed=Stopwatch.StartNew();
             for(int i=0;i<120;i++) {
-                while(elapsed.Elapsed.TotalMilliseconds<i*1000.0/60) Thread.Sleep(1);
+                while(elapsed.Elapsed.TotalMilliseconds<i*1000.0/fps) Thread.Sleep(1);
                 byte[] unit=new byte[starts[i+1]-starts[i]];
                 Buffer.BlockCopy(data,starts[i],unit,0,unit.Length);
-                decoder.Enqueue(new EncodedFrame{Data=unit,Timestamp=i*1000000L/60,Key=i%60==0});
+                decoder.Enqueue(new EncodedFrame{Data=unit,Timestamp=i*1000000L/fps,Key=i%60==0});
             }
             SpinWait.SpinUntil(()=>frames>=118 || error!=null,2000);
-            if(error!=null || frames<118) throw new Exception(width+"x"+height+" 60fps decoder: "+frames+" frames; "+error);
-            Console.WriteLine("PASS: "+width+"x"+height+" 60fps real H264 decode, "+frames+"/120 live frames");
+            if(error!=null || frames<118) throw new Exception(width+"x"+height+" "+fps+"fps decoder: "+frames+" frames; "+error);
+            Console.WriteLine("PASS: "+width+"x"+height+" "+fps+"fps real H264 decode, "+frames+"/120 live frames");
         }
     }
 }

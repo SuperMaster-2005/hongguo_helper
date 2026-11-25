@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -14,7 +14,7 @@ namespace HongguoRemote
         public static VideoFormat Parse(string text)
         {
             string[] parts=text.Split('|');int w,h,f;
-            if(parts.Length!=4||parts[0]!="H264"||!Int32.TryParse(parts[1],out w)||!Int32.TryParse(parts[2],out h)||!Int32.TryParse(parts[3],out f)||w<64||h<64||w>3200||h>3200||Math.Min(w,h)>1440||(long)w*h>3200*1440||w%2!=0||h%2!=0||(f!=30&&f!=60))throw new IOException("手机视频格式不受支持。");
+            if(parts.Length!=4||parts[0]!="H264"||!Int32.TryParse(parts[1],out w)||!Int32.TryParse(parts[2],out h)||!Int32.TryParse(parts[3],out f)||w<64||h<64||w>3200||h>3200||Math.Min(w,h)>1440||(long)w*h>3200*1440||w%2!=0||h%2!=0||(f!=30&&f!=60&&f!=90&&f!=120))throw new IOException("手机视频格式不受支持。");
             return new VideoFormat {Width=w,Height=h,Fps=f};
         }
     }
@@ -57,7 +57,7 @@ namespace HongguoRemote
             lock(gate){
                 if(stopped)return;
                 if(format==null)throw new IOException("先收到视频帧，缺少视频格式。");
-                if(queue.Count>=6||(queue.Count>0&&frame.Timestamp-queue.Peek().Timestamp>120000)){queue.Clear();waitingKey=true;restart=true;generation++;request=true;}
+                if(queue.Count>=18||(queue.Count>0&&frame.Timestamp-queue.Peek().Timestamp>180000)){queue.Clear();waitingKey=true;restart=true;generation++;request=true;}
                 if(waitingKey&&!frame.Key){request=true;}
                 else{waitingKey=false;queue.Enqueue(frame);changed.Set();}
             }
@@ -112,7 +112,7 @@ namespace HongguoRemote
             public Pipeline(string exe,VideoFormat value,Action<DecodedFrame> frame,Action<string> error,Action<string> warning)
             {
                 format=value;onFrame=frame;this.error=error;
-                var info=new ProcessStartInfo(exe,"-hide_banner -loglevel error -probesize 32 -analyzeduration 0 -flags low_delay -threads 1 -f h264 -i pipe:0 -an -sn -filter_threads 1 -threads 1 -flush_packets 1 -fps_mode passthrough -pix_fmt bgra -f rawvideo pipe:1") {UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
+                var info=new ProcessStartInfo(exe,"-hide_banner -loglevel error -probesize 32 -analyzeduration 0 -flags low_delay -threads 2 -thread_type slice -f h264 -i pipe:0 -an -sn -filter_threads 2 -threads 1 -flush_packets 1 -fps_mode passthrough -pix_fmt bgr0 -f rawvideo pipe:1") {UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
                 process=new Process{StartInfo=info};process.ErrorDataReceived+=(s,e)=>{if(!closed&&!String.IsNullOrWhiteSpace(e.Data))warning("解码器："+e.Data);};
                 process.Start();process.BeginErrorReadLine();
                 writeWatchdog=new Timer(CheckWrite,null,250,250);
@@ -143,7 +143,7 @@ namespace HongguoRemote
                         byte[] pixels;if(!recycled.TryTake(out pixels))pixels=new byte[checked(format.Width*format.Height*4)];int offset=0;
                         while(offset<pixels.Length){int n=output.Read(pixels,offset,pixels.Length-offset);if(n<=0)throw new EndOfStreamException("视频解码器已退出。");offset+=n;}
                         long timestamp;lock(sync){if(timestamps.Count==0)throw new IOException("视频帧时间戳缺失。");timestamp=timestamps.Dequeue();}
-                        onFrame(new DecodedFrame{Width=format.Width,Height=format.Height,Pixels=pixels,Timestamp=timestamp,ReturnBuffer=buffer=>{if(!closed&&recycled.Count<12)recycled.Add(buffer);}});
+                        onFrame(new DecodedFrame{Width=format.Width,Height=format.Height,Pixels=pixels,Timestamp=timestamp,ReturnBuffer=buffer=>{if(!closed&&recycled.Count<20)recycled.Add(buffer);}});
                     }
                 }catch(Exception e){if(!closed)error(e.Message);}
             }

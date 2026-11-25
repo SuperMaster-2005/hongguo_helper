@@ -10,7 +10,7 @@ final class VideoQueue {
     synchronized boolean offer(VideoFrame frame){
         boolean request=false;
         if(width!=frame.width || height!=frame.height){queue.clear();waitingKey=true;width=frame.width;height=frame.height;request=true;}
-        if(queue.size()>=6 || (!queue.isEmpty() && frame.pts-queue.peek().pts>120_000)){queue.clear();waitingKey=true;request=true;}
+        if(queue.size()>=18 || (!queue.isEmpty() && frame.pts-queue.peek().pts>180_000)){queue.clear();waitingKey=true;request=true;}
         if(waitingKey && !frame.key)return true;
         waitingKey=false;queue.add(frame);return request;
     }

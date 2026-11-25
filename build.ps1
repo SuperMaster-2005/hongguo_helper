@@ -51,4 +51,8 @@ $argsList += Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName
 & $compiler @argsList
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 Write-Host "Built $programPath"
+$uninstallerPath = Join-Path $PSScriptRoot 'uninstall.exe'
+& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 ('/out:' + $uninstallerPath) /reference:System.Windows.Forms.dll /win32icon:assets\hongguo.ico Uninstall.cs
+if ($LASTEXITCODE -ne 0) { throw 'Uninstaller build failed.' }
+Write-Host "Built $uninstallerPath"
 try { Update-DesktopShortcut $programPath } catch { Write-Warning ('Build succeeded, but could not create desktop shortcut: ' + $_.Exception.Message) }

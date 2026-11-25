@@ -17,6 +17,34 @@ class Tests
     {
         try { action(); return false; } catch (ArgumentException) { return true; }
     }
+    static void TestDiagnosticLog()
+    {
+        string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "HongguoLogTests-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(directory);
+        try
+        {
+            var log = new DiagnosticLog(directory);
+            log.Write("INFO", "连接测试 中文 text|私密搜索\n第二行");
+            log.Write("ERROR", "配对失败 123456 " + Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+            string saved = new DiagnosticLog(directory).Read();
+            Check(saved.Contains("连接测试 中文") && saved.Contains("[ERROR]"), "logs survive restart with Unicode and levels");
+            Check(!saved.Contains("私密搜索") && !saved.Contains("第二行") && !saved.Contains("123456") && !saved.Contains(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)), "logs redact input payload, pairing numbers and user path");
+            System.Threading.Tasks.Parallel.For(0, 20, i => log.Write("INFO", "parallel-" + i));
+            Check(log.Read().Contains("parallel-19") && log.StorageError == null, "concurrent logging succeeds");
+            for (int i = 0; i < 240; i++) log.Write("INFO", new string('中', 15000));
+            string[] files = System.IO.Directory.GetFiles(directory, "*.log");
+            Check(files.Length == 3 && files.All(p => new System.IO.FileInfo(p).Length <= DiagnosticLog.MaximumBytes), "logs rotate within three bounded files");
+            string blocked = System.IO.Path.Combine(directory, "blocked");
+            System.IO.File.WriteAllText(blocked, "file prevents directory creation");
+            var failing = new DiagnosticLog(blocked);
+            failing.Write("ERROR", "memory fallback");
+            Check(failing.StorageError != null && failing.Read().Contains("memory fallback") && failing.Read().Contains("日志保存失败"), "storage failure is visible and memory log is retained");
+            System.IO.File.Delete(blocked);
+            failing.Write("INFO", "recovered");
+            Check(failing.StorageError == null && failing.Read().Contains("recovered"), "logging recovers after storage becomes writable");
+        }
+        finally { System.IO.Directory.Delete(directory, true); }
+    }
     static int Main(string[] args)
     {
         Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -26,6 +54,8 @@ class Tests
         if (args.Length > 0 && args[0] == "--fail") { Console.Error.Write("expected failure"); return 7; }
         try
         {
+            TestDiagnosticLog();
+            if (args.Length > 0 && args[0] == "--log-only") return 0;
             if (args.Length == 1 && args[0] == "--video-only") { VideoTests.Run(); return 0; }
             var devices = DeviceBridge.ParseDevices("List of devices attached\r\nabc device product:x model:Redmi_K70 transport_id:1\r\ndef unauthorized usb:2\r\n192.168.1.8:5555 offline\r\nadb-x._adb-tls-connect._tcp device model:Phone\r\n* daemon started successfully *\r\n");
             Check(devices.Count == 4 && devices[0].Ready && devices[0].Model == "Redmi_K70", "device list parsing");

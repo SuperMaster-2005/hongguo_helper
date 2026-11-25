@@ -39,7 +39,7 @@ public class CaptureService extends Service {
     private final Object networkLock = new Object();
     private volatile int frameWidth, frameHeight;
     private int recoveryLongEdge=3200;
-    private int recoveryMaxFps=60;
+    private int recoveryMaxFps=120;
     private String captureFailure;
     private boolean wantsAudio;
     private volatile boolean alive;
@@ -117,7 +117,7 @@ public class CaptureService extends Service {
         if(edge<=960){
             if(encoder.fps<=30){fail("硬件编码异常，请重新共享："+message);return;}
             recoveryLongEdge=edge;
-            recoveryMaxFps=30;
+            recoveryMaxFps=encoder.fps>90?90:encoder.fps>60?60:30;
         }else{
             recoveryLongEdge=edge>2560?2560:edge>1920?1920:edge>1280?1280:960;
             recoveryMaxFps=encoder.fps;

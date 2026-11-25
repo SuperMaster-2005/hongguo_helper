@@ -23,6 +23,15 @@ public final class AndroidCompatibilityTests {
         check(Arrays.equals(RemoteAccessibility.touchBounds(cw,ch,sw,sh,window,root),expected),label);
     }
     public static void main(String[] args) {
+        VideoQueue queue=new VideoQueue();
+        for(int i=0;i<13;i++)queue.offer(new VideoFrame(1080,2400,120,i*8333L,i==0,new byte[1]));
+        check(queue.size()==13,"120fps short burst retains dependent frames");
+        queue.offer(new VideoFrame(1080,2400,120,200000,false,new byte[1]));
+        check(queue.size()==0,"stale burst waits for a fresh keyframe");
+        queue.offer(new VideoFrame(1080,2400,120,208333,false,new byte[1]));
+        check(queue.size()==0,"dependent frame rejected after overflow");
+        queue.offer(new VideoFrame(1080,2400,120,216666,true,new byte[1]));
+        check(queue.size()==1 && queue.poll().key,"fresh keyframe resumes queue");
         size(1080,2400,4096,4096,2,2);
         size(1440,3200,4096,4096,16,16);
         size(2400,1080,1920,1080,16,16);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -23,13 +23,18 @@ namespace HongguoRemote
         [STAThread]
         static void Main()
         {
+            DiagnosticLog.Current.Write("INFO", "程序启动；版本 " + typeof(App).Assembly.GetName().Version + "; Windows " + Environment.OSVersion + "; CLR " + Environment.Version);
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => DiagnosticLog.Current.Write("ERROR", "未处理异常：" + e.ExceptionObject);
+            TaskScheduler.UnobservedTaskException += (s, e) => DiagnosticLog.Current.Write("ERROR", "后台任务异常：" + e.Exception);
             var application = new Application();
+            application.Exit += (s, e) => DiagnosticLog.Current.Write("INFO", "程序退出");
             application.DispatcherUnhandledException += (s, e) => {
+                DiagnosticLog.Current.Write("ERROR", e.Exception.ToString());
                 MessageBox.Show(e.Exception.Message, "红果遥控端", MessageBoxButton.OK, MessageBoxImage.Error);
                 e.Handled = true;
             };
             try { new Controller(application).Run(); }
-            catch (Exception e) { MessageBox.Show(e.Message, "启动失败"); }
+            catch (Exception e) { DiagnosticLog.Current.Write("ERROR", e.ToString()); MessageBox.Show(e.Message + "\r\n日志目录：" + DiagnosticLog.Current.DirectoryPath, "启动失败"); }
         }
     }
 
@@ -67,7 +72,12 @@ namespace HongguoRemote
         readonly Queue<DecodedFrame> decoded=new Queue<DecodedFrame>();
         WriteableBitmap videoBitmap;
         readonly Stopwatch playbackStats=Stopwatch.StartNew();
-        int shownFrames;
+        int shownFrames,receivedFrames,decodedFrames;
+        long statsWindows;
+        int skippedVideoFrames,busyVideoFrames;
+        double submitMilliseconds,maxSubmitMilliseconds,maxSubmitGap;
+        long lastSubmit;
+        DateTime previousVideoPerformanceLog;
         long lastSyncRequest;
 
         T Get<T>(string name) where T : FrameworkElement { return (T)window.FindName(name); }
@@ -137,6 +147,7 @@ namespace HongguoRemote
             window.Deactivated += (s,e) => Get<System.Windows.Controls.Primitives.Popup>("ExitFullPopup").IsOpen=false;
             Click("ExitFull", ToggleFullscreen);
             Click("Help", Help);
+            Click("Logs", ShowLogs);
             Click("SendText", SendText);
             var companionImage = Get<System.Windows.Controls.Image>("CompanionImage");
             companionImage.MouseLeftButtonDown += (s,e) => {
@@ -171,7 +182,7 @@ namespace HongguoRemote
                     hooks = new Native.InputHooks { Target = () => video, Watch = () => Watching,
                         Key = key => window.Dispatcher.BeginInvoke(new Action(() => HandleKey(key))),
                         Wheel = next => window.Dispatcher.BeginInvoke(new Action(() => Input(() => bridge.Swipe(activeSerial, next)))) };
-                } catch (Exception error) { Log(error.Message); }
+                } catch (Exception error) { DiagnosticLog.Current.Write("ERROR", error.ToString()); Log(error.Message); }
                 SetStatus("打开手机助手并开始共享，然后点自动查找手机。"); timer.Start();
             };
             UpdateControls();
@@ -212,7 +223,7 @@ namespace HongguoRemote
             timedAudio=new TimedAudioPlayer(timeline,sound);var audioPlayback=timedAudio;
             var session=new CompanionClient(); companion=session;
             var decoderPath=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","tools","ffmpeg","ffmpeg.exe"));
-            try {h264=new H264Decoder(decoderPath);}catch(Exception e){Stop();SetStatus(e.Message);return;}
+            try {h264=new H264Decoder(decoderPath);}catch(Exception e){DiagnosticLog.Current.Write("ERROR",e.ToString());Stop();SetStatus(e.Message);return;}
             var decoder=h264;
             decoder.RequestKeyframe=()=>{
                 long now=DateTime.UtcNow.Ticks;
@@ -230,21 +241,21 @@ namespace HongguoRemote
             decoder.Error=message=>Ui(()=>{if(companion==session){Log(message);SetStatus(message);}});
             decoder.Frame=frame=>{
                 if(System.Threading.Interlocked.Exchange(ref firstPicture,1)==0) Ui(()=>Log("已解码第一帧"));
-                lock(decodedLock){if(companion!=session||!contentVisible){frame.Dispose();return;}while(decoded.Count>=8)decoded.Dequeue().Dispose();decoded.Enqueue(frame);}
+                lock(decodedLock){if(companion!=session||!contentVisible){frame.Dispose();return;}while(decoded.Count>=18)decoded.Dequeue().Dispose();decoded.Enqueue(frame);System.Threading.Interlocked.Increment(ref decodedFrames);}
             };
             session.VideoFormatChanged=format=>{
                 Ui(()=>Log("收到视频格式 "+format.Width+"×"+format.Height+" @ "+format.Fps));
                 decoder.Configure(format);
                 Ui(()=>{if(companion==session){lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}videoBitmap=null;Text("VideoStats","H.264 · "+format.Width+"×"+format.Height+" · 目标 "+format.Fps+" 帧");}});
             };
-            session.Video=frame=>{if(contentVisible){timeline.Observe(frame.Timestamp);decoder.Enqueue(frame);}};
+            session.Video=frame=>{if(contentVisible){System.Threading.Interlocked.Increment(ref receivedFrames);timeline.Observe(frame.Timestamp);decoder.Enqueue(frame);}};
             session.TimedAudio=(timestamp,data)=>{if(contentVisible)audioPlayback.Add(timestamp,data);};
             session.Sharing=visible=>{
                 if(companion!=session)return;
                 contentVisible=visible; decoder.Reset(); audioPlayback.Reset();
                 lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}
                 Ui(()=>{if(companion!=session || contentVisible!=visible)return;
-                    shownFrames=0;playbackStats.Restart();
+                    shownFrames=0;System.Threading.Interlocked.Exchange(ref receivedFrames,0);System.Threading.Interlocked.Exchange(ref decodedFrames,0);statsWindows=0;lastSubmit=0;skippedVideoFrames=busyVideoFrames=0;submitMilliseconds=maxSubmitMilliseconds=maxSubmitGap=0;playbackStats.Restart();
                     videoBitmap=null; Get<System.Windows.Controls.Image>("CompanionImage").Source=null;
                     Get<System.Windows.Controls.Image>("CompanionImage").Visibility=visible?Visibility.Visible:Visibility.Collapsed;
                     Get<StackPanel>("EmptyState").Visibility=visible?Visibility.Collapsed:Visibility.Visible;
@@ -253,7 +264,7 @@ namespace HongguoRemote
                 });
             };
             audioPlayback.Error=message=>Ui(()=>{if(companion==session)SetStatus(message);});
-            shownFrames=0;playbackStats.Restart();
+            shownFrames=0;System.Threading.Interlocked.Exchange(ref receivedFrames,0);System.Threading.Interlocked.Exchange(ref decodedFrames,0);statsWindows=0;lastSubmit=0;skippedVideoFrames=busyVideoFrames=0;submitMilliseconds=maxSubmitMilliseconds=maxSubmitGap=0;playbackStats.Restart();
             session.ControlEnabled=enabled=>Ui(()=>{
                 if(companion!=session)return;
                 companionControlEnabled=enabled;
@@ -291,16 +302,39 @@ namespace HongguoRemote
         {
             if(companion==null||!companion.Connected||!contentVisible||mediaClock==null)return;
             DecodedFrame frame=null;
-            lock(decodedLock){while(decoded.Count>0&&mediaClock.Delay(decoded.Peek().Timestamp)<=3){if(frame!=null)frame.Dispose();frame=decoded.Dequeue();}}
+            lock(decodedLock){while(decoded.Count>0&&mediaClock.Delay(decoded.Peek().Timestamp)<=3){if(frame!=null){frame.Dispose();skippedVideoFrames++;}frame=decoded.Dequeue();}}
             if(frame!=null){
                 try{
                     if(mediaClock.Delay(frame.Timestamp)>=-150){
-                        if(videoBitmap==null||videoBitmap.PixelWidth!=frame.Width||videoBitmap.PixelHeight!=frame.Height){videoBitmap=new WriteableBitmap(frame.Width,frame.Height,96,96,System.Windows.Media.PixelFormats.Bgra32,null);Get<System.Windows.Controls.Image>("CompanionImage").Source=videoBitmap;}
-                        videoBitmap.WritePixels(new Int32Rect(0,0,frame.Width,frame.Height),frame.Pixels,frame.Width*4,0);shownFrames++;
-                    }
+                        if(videoBitmap==null||videoBitmap.PixelWidth!=frame.Width||videoBitmap.PixelHeight!=frame.Height){videoBitmap=new WriteableBitmap(frame.Width,frame.Height,96,96,System.Windows.Media.PixelFormats.Bgr32,null);Get<System.Windows.Controls.Image>("CompanionImage").Source=videoBitmap;}
+                        long submitStarted=Stopwatch.GetTimestamp();
+                        // Skip a busy compositor instead of blocking the UI and accumulating stale frames.
+                        if(videoBitmap.TryLock(new Duration(TimeSpan.Zero))){
+                            try{
+                                int stride=frame.Width*4;
+                                if(videoBitmap.BackBufferStride==stride)System.Runtime.InteropServices.Marshal.Copy(frame.Pixels,0,videoBitmap.BackBuffer,frame.Pixels.Length);
+                                else for(int row=0;row<frame.Height;row++)System.Runtime.InteropServices.Marshal.Copy(frame.Pixels,row*stride,IntPtr.Add(videoBitmap.BackBuffer,row*videoBitmap.BackBufferStride),stride);
+                                videoBitmap.AddDirtyRect(new Int32Rect(0,0,frame.Width,frame.Height));shownFrames++;
+                                if(lastSubmit!=0)maxSubmitGap=Math.Max(maxSubmitGap,(submitStarted-lastSubmit)*1000.0/Stopwatch.Frequency);
+                                lastSubmit=submitStarted;
+                            }finally{videoBitmap.Unlock();}
+                            double elapsed=(Stopwatch.GetTimestamp()-submitStarted)*1000.0/Stopwatch.Frequency;
+                            submitMilliseconds+=elapsed;maxSubmitMilliseconds=Math.Max(maxSubmitMilliseconds,elapsed);
+                        }else busyVideoFrames++;
+                    }else skippedVideoFrames++;
                 }finally{frame.Dispose();}
             }
-            if(playbackStats.ElapsedMilliseconds>=1000){Text("PlaybackFps","实际播放 "+(shownFrames/playbackStats.Elapsed.TotalSeconds).ToString("F0")+" 帧/秒");shownFrames=0;playbackStats.Restart();}
+            if(playbackStats.ElapsedMilliseconds>=1000){
+                double seconds=playbackStats.Elapsed.TotalSeconds;
+                string stats="接收 "+(System.Threading.Interlocked.Exchange(ref receivedFrames,0)/seconds).ToString("F0")+" · 解码 "+(System.Threading.Interlocked.Exchange(ref decodedFrames,0)/seconds).ToString("F0")+" · 播放 "+(shownFrames/seconds).ToString("F0")+" 帧/秒";
+                Text("PlaybackFps",stats);
+                if(++statsWindows==1 || (DateTime.UtcNow-previousVideoPerformanceLog).TotalSeconds>=10){
+                    DiagnosticLog.Current.Write("INFO","视频性能 BGR32："+stats+"；跳过 "+skippedVideoFrames+"；合成器忙 "+busyVideoFrames+"；提交平均/最大 "+(submitMilliseconds/Math.Max(1,shownFrames)).ToString("F2")+"/"+maxSubmitMilliseconds.ToString("F2")+"ms；最大提交间隔 "+maxSubmitGap.ToString("F1")+"ms");
+                    previousVideoPerformanceLog=DateTime.UtcNow;
+                }
+                skippedVideoFrames=busyVideoFrames=0;submitMilliseconds=maxSubmitMilliseconds=maxSubmitGap=0;
+                shownFrames=0;playbackStats.Restart();
+            }
         }
         void SendCompanion(string command) { if(companion!=null) { var session=companion; Input(()=>session.Send(command)); } }
         void Swipe(bool next)
@@ -427,8 +461,14 @@ namespace HongguoRemote
 
         void Log(string message)
         {
+            DiagnosticLog.Current.Write(message != null && (message.Contains("失败") || message.Contains("异常") || message.IndexOf("ERROR", StringComparison.OrdinalIgnoreCase) >= 0) ? "ERROR" : "INFO", message);
+            message = DiagnosticLog.Sanitize(message);
             if (closing || window.Dispatcher.HasShutdownStarted) return;
-            if (!window.Dispatcher.CheckAccess()) { window.Dispatcher.BeginInvoke(new Action(() => Log(message))); return; }
+            if (!window.Dispatcher.CheckAccess()) { window.Dispatcher.BeginInvoke(new Action(() => AppendLog(message))); return; }
+            AppendLog(message);
+        }
+        void AppendLog(string message)
+        {
             if (logs.Length > 18000) logs.Remove(0, logs.Length - 12000);
             logs.AppendLine(DateTime.Now.ToString("HH:mm:ss") + "  " + message);
             if (message.IndexOf("ERROR", StringComparison.OrdinalIgnoreCase) >= 0 || message.IndexOf("WARN", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -442,7 +482,7 @@ namespace HongguoRemote
             try {
                 if (requireAdb && !bridge.Available) throw new FileNotFoundException("缺少投屏组件，请保留程序旁的 tools/scrcpy-win64-v5.0.1 目录。详见 README。");
                 await action();
-            } catch (Exception e) { if (!closing) { SetStatus(e.Message); MessageBox.Show(window, e.Message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Information); } }
+            } catch (Exception e) { DiagnosticLog.Current.Write("ERROR", e.ToString()); if (!closing) { SetStatus(e.Message); MessageBox.Show(window, e.Message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Information); } }
             finally { busy = false; if (!closing) UpdateControls(); }
         }
         Task Refresh() { return Refresh(true); }
@@ -563,7 +603,7 @@ namespace HongguoRemote
                 finally { old.Dispose(); }
             }
             if (closing) return;
-            Text("VideoStats", "高清 · 优先 60 帧");Text("PlaybackFps", "帧率以实际播放为准");
+            Text("VideoStats", "高清 · 最高 120 帧");Text("PlaybackFps", "帧率以实际播放为准");
             Get<System.Windows.Controls.Image>("CompanionImage").Source=null;
             Get<System.Windows.Controls.Image>("CompanionImage").Visibility=Visibility.Collapsed;
             Get<Border>("VideoHost").Visibility = Visibility.Collapsed;
@@ -657,6 +697,34 @@ namespace HongguoRemote
         static readonly System.Windows.Media.SolidColorBrush DotLive = Dot(0x3D, 0xD6, 0x8C);
         static readonly System.Windows.Media.SolidColorBrush DotWait = Dot(0xF5, 0xA6, 0x23);
         static readonly System.Windows.Media.SolidColorBrush DotIdle = Dot(0x5B, 0x60, 0x70);
+        void ShowLogs()
+        {
+            var dialog = new Window { Owner = window, Title = "运行日志", Width = 840, Height = 600, MinWidth = 500, MinHeight = 320,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = window.Background, Foreground = window.Foreground };
+            var layout = new DockPanel { Margin = new Thickness(16) };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal };
+            DockPanel.SetDock(actions, Dock.Top); layout.Children.Add(actions);
+            var refresh = new Button { Content = "刷新日志", Margin = new Thickness(0,0,8,8) };
+            var export = new Button { Content = "导出日志…", Margin = new Thickness(0,0,8,8) };
+            refresh.Style = export.Style = window.FindResource(typeof(Button)) as Style;
+            actions.Children.Add(refresh); actions.Children.Add(export);
+            var hint = new TextBlock { Text = "复现问题后导出日志，将生成的文本文件发给开发者。日志可能包含设备名称和局域网地址。\n保存目录：" + DiagnosticLog.Current.DirectoryPath,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,0,0,10) };
+            DockPanel.SetDock(hint, Dock.Top); layout.Children.Add(hint);
+            var box = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = window.Background, Foreground = window.Foreground, FontFamily = new System.Windows.Media.FontFamily("Consolas"), Padding = new Thickness(8) };
+            Action reload = () => { box.Text = DiagnosticLog.Current.Read(); box.ScrollToEnd(); };
+            refresh.Click += (s,e) => reload();
+            export.Click += (s,e) => {
+                var save = new Microsoft.Win32.SaveFileDialog { Title = "导出运行日志", Filter = "文本日志 (*.txt)|*.txt", DefaultExt = ".txt",
+                    FileName = "红果日志-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt" };
+                if (save.ShowDialog(dialog) != true) return;
+                try { File.WriteAllText(save.FileName, DiagnosticLog.Current.Read(), new UTF8Encoding(true)); MessageBox.Show(dialog, "日志已导出，请将文件发给开发者。", "导出完成"); }
+                catch (Exception error) { DiagnosticLog.Current.Write("ERROR", "导出日志失败：" + error); MessageBox.Show(dialog, error.Message, "导出失败"); }
+            };
+            layout.Children.Add(box); dialog.Content = layout; reload(); dialog.ShowDialog();
+        }
         void Help()
         {
             var help = new Window { Owner = window, Title = "使用说明与诊断", Width = 760, Height = 620, WindowStartupLocation = WindowStartupLocation.CenterOwner,

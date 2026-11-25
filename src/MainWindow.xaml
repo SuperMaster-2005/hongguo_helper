@@ -209,6 +209,7 @@
    <StackPanel>
     <WrapPanel x:Name="Toolbar" VerticalAlignment="Center">
      <Button x:Name="ConnectionToggle" Content="连接与设置" Margin="0,0,8,0"/>
+     <Button x:Name="Logs" Content="运行日志" Margin="0,0,8,0"/>
      <Button x:Name="Pause" Content="播放 / 暂停" Margin="0,0,8,0"/>
      <Button x:Name="Back" Content="返回" Margin="0,0,8,0"/>
      <Button x:Name="SendText" Content="输入文字" Margin="0,0,8,0"/>
@@ -216,7 +217,7 @@
     </WrapPanel>
     <DockPanel Margin="0,8,0,0">
      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-      <TextBlock x:Name="VideoStats" Text="高清 · 优先 60 帧" Foreground="#8B90A2" FontSize="11" Margin="12,0"/>
+      <TextBlock x:Name="VideoStats" Text="高清 · 最高 120 帧" Foreground="#8B90A2" FontSize="11" Margin="12,0"/>
       <TextBlock x:Name="PlaybackFps" Text="等待画面" Foreground="#8B90A2" FontSize="11"/>
      </StackPanel>
      <TextBlock x:Name="Status" Text="打开手机助手，开始连接" Foreground="#8B90A2" TextTrimming="CharacterEllipsis"/>
