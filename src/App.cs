@@ -52,6 +52,8 @@ namespace HongguoRemote
         IntPtr video;
         string activeSerial;
         bool busy, inputBusy, closing, fullscreen, embedded;
+        bool automaticDiscovery=true;
+        DateTime nextAutomaticDiscovery;
         WindowState previousState;
         Rect previousBounds;
         bool connectionPanelOpen = true;
@@ -184,7 +186,7 @@ namespace HongguoRemote
                         Key = key => window.Dispatcher.BeginInvoke(new Action(() => HandleKey(key))),
                         Wheel = next => window.Dispatcher.BeginInvoke(new Action(() => Input(() => bridge.Swipe(activeSerial, next)))) };
                 } catch (Exception error) { DiagnosticLog.Current.Write("ERROR", error.ToString()); Log(error.Message); }
-                SetStatus("打开手机助手并开始共享，然后点自动查找手机。"); timer.Start();
+                SetStatus("打开手机助手并开始共享，电脑会自动查找并请求连接。"); timer.Start();
             };
             UpdateControls();
         }
@@ -201,20 +203,28 @@ namespace HongguoRemote
             if (x<0 || y<0 || x>width || y>height) return null;
             return crop.Map(new Point(x/width*10000,y/height*10000));
         }
-        async Task FindCompanion()
+        Task FindCompanion() { return FindCompanion(false); }
+        async Task FindCompanion(bool automatic)
         {
             Get<StackPanel>("AutoPairPanel").Visibility=Visibility.Collapsed;
-            DiscoveryStatus("正在寻找手机助手…请在手机上点开始共享。");
+            if(!automatic) DiscoveryStatus("正在寻找手机助手…请在手机上点开始共享。");
             var devices=await CompanionClient.Discover();
-            if (closing) return;
+            if (closing || (automatic && !automaticDiscovery) || Running) return;
             var choices=Get<ComboBox>("CompanionChoices"); choices.ItemsSource=devices;
             choices.Visibility=devices.Count>1 ? Visibility.Visible : Visibility.Collapsed;
             choices.SelectedIndex=devices.Count==1 ? 0 : -1;
-            if (devices.Count==0) DiscoveryStatus("未找到手机助手。请先安装并打开手机 App，点开始共享；电脑保持连接手机热点，再重试。");
+            nextAutomaticDiscovery=DateTime.UtcNow.AddSeconds(5);
+            if (devices.Count==0) {
+                if(!automatic) DiscoveryStatus("未找到手机助手。请先安装并打开手机 App，点开始共享；电脑保持连接手机热点，再重试。");
+            }
             else if (devices.Count == 1) {
+                automaticDiscovery=false;
                 DiscoveryStatus("已找到 " + devices[0].Model + "，正在请求连接。");
                 StartCompanion(devices[0]);
-            } else DiscoveryStatus("找到多台手机，请选择你的手机后开始投屏。");
+            } else {
+                automaticDiscovery=false;
+                DiscoveryStatus("找到多台手机，请选择你的手机后开始投屏。");
+            }
         }
         void Ui(Action action) { if (!closing && !window.Dispatcher.HasShutdownStarted) window.Dispatcher.BeginInvoke(new Action(() => { if (!closing) action(); })); }
         void StartCompanion(CompanionDevice device)
@@ -460,14 +470,15 @@ namespace HongguoRemote
                 Text("Status", "投屏提示：" + message + "（详见使用说明与诊断）");
         }
         void SetStatus(string message) { Text("Status", message); Get<TextBlock>("Status").ToolTip = message; Log(message); }
-        async void Work(Func<Task> action, bool requireAdb = true)
+        async void Work(Func<Task> action, bool requireAdb = true, bool reportErrors = true)
         {
             if (busy || closing) return;
+            if(requireAdb) automaticDiscovery=false;
             busy = true; UpdateControls();
             try {
                 if (requireAdb && !bridge.Available) throw new FileNotFoundException("缺少投屏组件，请保留程序旁的 tools/scrcpy-win64-v5.0.1 目录。详见 README。");
                 await action();
-            } catch (Exception e) { DiagnosticLog.Current.Write("ERROR", e.ToString()); if (!closing) { SetStatus(e.Message); MessageBox.Show(window, e.Message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Information); } }
+            } catch (Exception e) { automaticDiscovery=false; DiagnosticLog.Current.Write("ERROR", e.ToString()); if (!closing) { SetStatus(e.Message); if(reportErrors) MessageBox.Show(window, e.Message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Information); } }
             finally { busy = false; if (!closing) UpdateControls(); }
         }
         Task Refresh() { return Refresh(true); }
@@ -496,6 +507,7 @@ namespace HongguoRemote
         }
         void Start()
         {
+            automaticDiscovery=false;
             var deviceFromApp=Get<ComboBox>("CompanionChoices").SelectedItem as CompanionDevice;
             if(deviceFromApp!=null) { if(!Running && !busy) StartCompanion(deviceFromApp); return; }
             if(Get<ComboBox>("CompanionChoices").Items.Count>0) {SetStatus("请选择要连接的手机。");return;}
@@ -514,6 +526,8 @@ namespace HongguoRemote
         }
         void Tick()
         {
+            if(automaticDiscovery && !busy && !Running && !closing && DateTime.UtcNow>=nextAutomaticDiscovery)
+                Work(()=>FindCompanion(true),false,false);
             if (mirror == null || closing) return;
             if (mirror.HasExited)
             {
@@ -567,6 +581,7 @@ namespace HongguoRemote
         }
         void Stop()
         {
+            automaticDiscovery=false;
             if (fullscreen && !closing) ToggleFullscreen();
             contentVisible=false;
             companionControlEnabled=false;
@@ -714,7 +729,7 @@ namespace HongguoRemote
                 BorderThickness = new Thickness(0), Padding = new Thickness(4) };
             box.Text = "首次使用\r\n1. 手机上开启 USB 调试，用数据线连接，在手机弹窗中允许调试。\r\n2. 点击刷新设备，选择已就绪的手机，打开手机上的红果，再开始投屏。\r\n3. 鼠标点击和拖动对应手机触摸。观看快捷键开启时，画面内滚轮/↑↓发送滑动；搜索选集时关闭观看快捷键。\r\n4. 中文可在电脑复制，在手机输入框聚焦后 Ctrl+V 粘贴；不自动同步手机剪贴板。\r\n\r\n红米 / 小米\r\n若能显示不能点击，请检查开发者选项中的「USB 调试（安全设置）」，按系统要求授权。\r\n没有 USB 提示时，先换支持数据传输的线和电脑 USB 口。\r\n\r\n无线 / 热点\r\n电脑与手机在同一网络。Android 11+ 的无线调试中，先用配对码弹窗的地址配对，再用无线调试主页面的地址连接；两个端口通常不同。热点是否支持无线调试由手机系统决定。\r\n不支持配对时，可先接 USB，点 USB 转无线，再输入手机 IP:5555 连接。无线连接成功后才拔线。结束后可点恢复 USB 模式关闭 5555；无线调试开关需在手机设置中关闭。\r\n\r\n注意\r\n播放操作请点击手机画面内的按钮。快捷滑动不等于保证切换下一集。账号、选集、收藏和付费仍由手机红果处理。音频与受保护画面以手机和应用实际支持为准。\r\n本工具是本地遥控工具，非红果官方客户端。\r\n\r\n诊断（仅本次会话，不含配对码）\r\n" + logs;
             box.Text = "热点 / Wi-Fi 快捷连接（推荐）\r\n电脑连接手机热点后，手机开启无线调试 → 使用配对码配对设备。电脑点「自动查找手机」，找到后只输入 6 位码，配对后自动连接。地址和端口自动发现，不需要手填。\r\n若手机提示必须连接 Wi-Fi，当前系统不支持仅用热点开启无线调试。自动发现依赖手机广播服务；被网络隔离时请查看高级连接。\r\n\r\n" + box.Text;
-            box.Text="手机助手模式（无需调试）\r\n手机安装 HongguoCompanion.apk，电脑连手机热点。手机点开始共享，电脑点查找并连接手机，手机允许本次连接。第一次需手动开启无障碍控制。中文请用底部输入文字按钮。声音转发需手机音频授权，且红果允许捕获。\r\n\r\n"+box.Text;
+            box.Text="手机助手模式（无需调试）\r\n手机安装 HongguoCompanion.apk，电脑连手机热点。手机点开始共享，电脑启动后自动查找并请求连接，手机允许本次连接；也可手动点查找重试。仅观看可跳过无障碍控制并记住选择；需要遥控时，在手机点开启电脑控制进入系统设置，返回后继续共享。中文搜索请在手机输入。声音转发需手机音频授权，且红果允许捕获。\r\n\r\n"+box.Text;
             help.Content = box; help.ShowDialog();
         }
     }

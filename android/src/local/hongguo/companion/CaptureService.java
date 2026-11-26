@@ -55,7 +55,7 @@ public class CaptureService extends Service {
         if (intent != null && "STOP".equals(intent.getAction())) { stopSelf(); return START_NOT_STICKY; }
         if (running) return START_NOT_STICKY;
         if(Build.VERSION.SDK_INT<34){stopSelf();return START_NOT_STICKY;}
-        if (intent == null || (!intent.hasExtra("capture") || !intent.getBooleanExtra("redFruitSelected",false))) { stopSelf(); return START_NOT_STICKY; }
+        if (intent == null || !intent.hasExtra("capture")) { stopSelf(); return START_NOT_STICKY; }
         try {
             notifications = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
             notifications.createNotificationChannel(new NotificationChannel("share","屏幕共享",NotificationManager.IMPORTANCE_DEFAULT));

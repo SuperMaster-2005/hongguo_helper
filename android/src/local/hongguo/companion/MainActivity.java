@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(MainActivity.this).setTitle("电脑控制尚未就绪")
                     .setMessage("部分系统在开启权限后需要时间连接服务。可继续等待；仅观看不需要此权限。若一直未就绪，请在系统设置检查无障碍权限和应用运行限制。")
                     .setPositiveButton("继续等待",(d,w)->waitForControlUntil=SystemClock.elapsedRealtime()+CONTROL_SERVICE_WAIT_MS)
-                    .setNegativeButton("仅观看",(d,w)->continueSharing()).show();
+                    .setNegativeButton("仅观看",(d,w)->watchOnly()).show();
             }
         }
         control.setText(on ? "电脑控制已开启，可识别红果前台" : "电脑控制未开启，仍可观看");
@@ -98,7 +98,7 @@ public class MainActivity extends Activity {
         step(steps, 1, "电脑连接这台手机的热点");
         step(steps, 2, "按需开启电脑控制，仅观看可跳过");
         step(steps, 3, "点击开始共享，确认系统提示");
-        step(steps, 4, "电脑点自动查找，这里允许连接");
+        step(steps, 4, "电脑自动查找，这里允许连接");
         step(steps, 5, "打开红果短剧，电脑自动显示画面");
 
         LinearLayout controlCard = card(body);
@@ -110,10 +110,11 @@ public class MainActivity extends Activity {
         controlRow.addView(control, new LinearLayout.LayoutParams(0, -2, 1));
         controlCard.addView(controlRow);
         Button enable = button(controlCard, "开启电脑控制", false); ((LinearLayout.LayoutParams)enable.getLayoutParams()).topMargin = dp(12);
-        enable.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("启用电脑遥控")
-            .setMessage("需要你在无障碍设置中开启「红果手机助手 · 电脑控制」。仅在你共享并允许连接后接收电脑操作。输入功能会读取当前输入框节点，不保存或上传内容。\n\n若系统提示「受限制的设置」，请到本应用信息页按系统指引允许。不同手机菜单名称可能不同。未开启时仍可观看，不能使用电脑遥控。")
-            .setPositiveButton("去设置",(d,w)->openControlSettings(false))
-            .setNegativeButton("暂不",null).show());
+        enable.setOnClickListener(v -> {
+            getPreferences(MODE_PRIVATE).edit().putBoolean("watchOnly",false).apply();
+            if (RemoteAccessibility.instance != null) beginSharing();
+            else openControlSettings(true);
+        });
 
         LinearLayout shareCard = card(body);
         audio = new CheckBox(this); audio.setText("声音传到电脑，并将手机媒体音量设为零"); audio.setTextColor(TEXT); audio.setTextSize(15);
@@ -140,6 +141,16 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},21);
     }
     private void openControlSettings(boolean continueSharing) {
+        // Android exposes this route on some systems but not as a public SDK constant.
+        Intent details = new Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+            .putExtra(Intent.EXTRA_COMPONENT_NAME,new ComponentName(this,RemoteAccessibility.class).flattenToString());
+        try {
+            if (continueSharing) startActivityForResult(details, ACCESSIBILITY_FOR_SHARE);
+            else startActivity(details);
+            return;
+        } catch (ActivityNotFoundException | SecurityException unavailable) {
+            // Some vendors expose only the accessibility service list.
+        }
         Intent settings = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
         try {
             if (continueSharing) startActivityForResult(settings, ACCESSIBILITY_FOR_SHARE);
@@ -165,13 +176,20 @@ public class MainActivity extends Activity {
                 .setMessage("仅红果共享需要安卓 14 及以上。此设备不启动整屏采集，避免共享其他应用。")
                 .setPositiveButton("知道了",null).show();return;
         }
-        if (RemoteAccessibility.instance == null) {
+        if (RemoteAccessibility.instance == null && !getPreferences(MODE_PRIVATE).getBoolean("watchOnly",false)) {
             new AlertDialog.Builder(this).setTitle("电脑控制可选")
                 .setMessage("不启用电脑控制也可以观看。若需要从电脑点击、滑动或输入文字，可先开启权限。")
-                .setPositiveButton("去开启", (d,w) -> openControlSettings(true))
-                .setNegativeButton("仅观看", (d,w) -> continueSharing()).show();
+                .setPositiveButton("去开启", (d,w) -> {
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("watchOnly",false).apply();
+                    openControlSettings(true);
+                })
+                .setNegativeButton("仅观看", (d,w) -> watchOnly()).show();
             return;
         }
+        continueSharing();
+    }
+    private void watchOnly() {
+        getPreferences(MODE_PRIVATE).edit().putBoolean("watchOnly",true).apply();
         continueSharing();
     }
     private void continueSharing() {
@@ -212,20 +230,15 @@ public class MainActivity extends Activity {
             return;
         }
         if (request == 10 && result == RESULT_OK && data != null) {
-            new AlertDialog.Builder(this).setTitle("确认共享红果短剧")
-                .setMessage("只有在系统弹窗选择了「单个应用 → 红果短剧」时才继续。助手无法核验系统选择。如果选了整个屏幕或其他应用，请取消并重新选择。")
-                .setPositiveButton("已选择红果短剧", (d,w) -> {
-                    if (CaptureService.running) return;
-                    Intent service = new Intent(this,CaptureService.class).putExtra("capture",data)
-                        .putExtra("redFruitSelected",true).putExtra("audio",audio.isChecked());
-                    try { startForegroundService(service); }
-                    catch(RuntimeException e){
-                        android.util.Log.w("HongguoActivity","无法启动共享服务",e);
-                        CaptureService.status="系统未允许启动共享。请保持助手在前台重新授权，并检查应用运行限制。";
-                        status.setText(CaptureService.status);
-                    }
-                })
-                .setNegativeButton("取消", null).show();
+            if (CaptureService.running) return;
+            Intent service = new Intent(this,CaptureService.class).putExtra("capture",data)
+                .putExtra("audio",audio.isChecked());
+            try { startForegroundService(service); }
+            catch(RuntimeException e){
+                android.util.Log.w("HongguoActivity","无法启动共享服务",e);
+                CaptureService.status="系统未允许启动共享。请保持助手在前台重新授权，并检查应用运行限制。";
+                status.setText(CaptureService.status);
+            }
         } else if (request == 10) status.setText("你取消了共享。需要时可再次点击开始共享。");
     }
     @Override protected void onResume() { super.onResume(); handler.post(update); }

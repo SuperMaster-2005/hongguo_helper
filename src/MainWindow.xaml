@@ -178,7 +178,7 @@
      <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
       <TextBlock Text="连接你的手机" FontSize="17" FontWeight="SemiBold"/>
       <ContentControl Style="{StaticResource HelpIcon}">
-       <ToolTipService.ToolTip><TextBlock TextWrapping="Wrap" MaxWidth="280" Text="电脑连接手机热点后，点「查找并连接手机」即可自动发现，无需填写地址。自动发现失败时，再展开下方「高级连接」。"/></ToolTipService.ToolTip>
+       <ToolTipService.ToolTip><TextBlock TextWrapping="Wrap" MaxWidth="280" Text="电脑连接手机热点，手机开始共享后，程序会自动查找并请求连接，无需填写地址。结束或拒绝连接后，可点「查找并连接手机」重试。"/></ToolTipService.ToolTip>
       </ContentControl>
      </StackPanel>
      <Grid Margin="0,0,0,8">
@@ -260,7 +260,7 @@
       </Border>
      </Border>
      <TextBlock x:Name="EmptyTitle" Text="把手机里的故事，搬到大屏" FontSize="21" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"/>
-     <TextBlock x:Name="EmptyHint" Text="手机助手开始共享 → 电脑查找并连接&#10;手机允许本次连接" Style="{StaticResource Hint}" TextAlignment="Center" Margin="0,14,0,0"/>
+     <TextBlock x:Name="EmptyHint" Text="手机助手开始共享 → 电脑自动查找&#10;手机允许本次连接" Style="{StaticResource Hint}" TextAlignment="Center" Margin="0,14,0,0"/>
      <TextBlock Text="手机播放 · 电脑观看" Foreground="#5F6578" FontSize="12" TextAlignment="Center" Margin="0,22,0,0"/>
     </StackPanel>
     <Border x:Name="VideoHost" Visibility="Collapsed"/>
