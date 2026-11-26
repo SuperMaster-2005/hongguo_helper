@@ -71,10 +71,12 @@ namespace HongguoRemote
         readonly object decodedLock=new object();
         readonly Queue<DecodedFrame> decoded=new Queue<DecodedFrame>();
         WriteableBitmap videoBitmap;
+        readonly VideoCrop crop;
         DecodedFrame pendingVideoFrame;
         TimeSpan lastVideoRenderingTime=TimeSpan.MinValue;
         readonly Stopwatch playbackStats=Stopwatch.StartNew();
         int shownFrames,receivedFrames,decodedFrames;
+        readonly SourceFrameTiming sourceTiming=new SourceFrameTiming();
         long statsWindows;
         int skippedVideoFrames,busyVideoFrames;
         double submitMilliseconds,maxSubmitMilliseconds,maxSubmitGap;
@@ -140,8 +142,6 @@ namespace HongguoRemote
                 string result = await bridge.RestoreUsb(ReadyDevice().Serial);
                 await Refresh(false); SetStatus(result + "；5555 监听已请求关闭，USB 线连接后刷新设备。");
             }));
-            Click("Pause", () => SendKey(85));
-            Click("Back", () => SendKey(4));
             Click("Fullscreen", ToggleFullscreen);
             Click("ConnectionToggle", () => { connectionPanelOpen=!connectionPanelOpen; UpdateLayoutMode(); });
             window.SizeChanged += (s,e) => UpdateLayoutMode();
@@ -150,8 +150,9 @@ namespace HongguoRemote
             Click("ExitFull", ToggleFullscreen);
             Click("Help", Help);
             Click("Logs", ShowLogs);
-            Click("SendText", SendText);
             var companionImage = Get<System.Windows.Controls.Image>("CompanionImage");
+            crop = new VideoCrop(window, companionImage);
+            Click("Crop", () => crop.Edit(true));
             companionImage.MouseLeftButtonDown += (s,e) => {
                 if (companion == null || !companion.Connected || !contentVisible) return;
                 touchStart = ImagePoint(e.GetPosition(companionImage)); touchTime = DateTime.UtcNow;
@@ -166,15 +167,13 @@ namespace HongguoRemote
                 }
                 touchStart = null; e.Handled = true;
             };
-            companionImage.MouseRightButtonUp += (s,e) => { SendKey(4); e.Handled=true; };
             companionImage.MouseWheel += (s,e) => { Swipe(e.Delta < 0); e.Handled=true; };
             timer.Tick += (s, e) => Tick();
             window.PreviewKeyDown += (s, e) => {
                 if (e.Key == Key.F11) { ToggleFullscreen(); e.Handled = true; }
                 else if (e.Key == Key.Escape && fullscreen) { ToggleFullscreen(); e.Handled = true; }
                 else if (companionImage.IsKeyboardFocused && companion != null && companion.Connected && contentVisible && Watching && Keyboard.Modifiers == ModifierKeys.None) {
-                    if (e.Key == Key.Space) { SendKey(85); e.Handled = true; }
-                    else if (e.Key == Key.Up || e.Key == Key.Down) { Swipe(e.Key == Key.Down); e.Handled = true; }
+                    if (e.Key == Key.Up || e.Key == Key.Down) { Swipe(e.Key == Key.Down); e.Handled = true; }
                 }
             };
             System.Windows.Media.CompositionTarget.Rendering+=RenderVideo;
@@ -200,7 +199,7 @@ namespace HongguoRemote
             double width=source.PixelWidth*scale,height=source.PixelHeight*scale;
             double x=point.X-(image.ActualWidth-width)/2,y=point.Y-(image.ActualHeight-height)/2;
             if (x<0 || y<0 || x>width || y>height) return null;
-            return new Point(x/width*10000,y/height*10000);
+            return crop.Map(new Point(x/width*10000,y/height*10000));
         }
         async Task FindCompanion()
         {
@@ -223,7 +222,7 @@ namespace HongguoRemote
             Stop(); pcm=new PcmPlayer(); audioFailed=false;
             mediaClock=new MediaClock();var timeline=mediaClock;var sound=pcm;
             timedAudio=new TimedAudioPlayer(timeline,sound);var audioPlayback=timedAudio;
-            var session=new CompanionClient(); companion=session;
+            var session=new CompanionClient(); companion=session;sourceTiming.Reset();
             var decoderPath=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","tools","ffmpeg","ffmpeg.exe"));
             try {h264=new H264Decoder(decoderPath);}catch(Exception e){DiagnosticLog.Current.Write("ERROR",e.ToString());Stop();SetStatus(e.Message);return;}
             var decoder=h264;
@@ -246,19 +245,20 @@ namespace HongguoRemote
                 lock(decodedLock){if(companion!=session||!contentVisible){frame.Dispose();return;}while(decoded.Count>=18)decoded.Dequeue().Dispose();decoded.Enqueue(frame);System.Threading.Interlocked.Increment(ref decodedFrames);}
             };
             session.VideoFormatChanged=format=>{
+                sourceTiming.Reset();
                 Ui(()=>Log("收到视频格式 "+format.Width+"×"+format.Height+" @ "+format.Fps));
                 decoder.Configure(format);
                 Ui(()=>{if(companion==session){lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}if(pendingVideoFrame!=null){pendingVideoFrame.Dispose();pendingVideoFrame=null;}videoBitmap=null;Text("VideoStats","H.264 · "+format.Width+"×"+format.Height+" · 目标 "+format.Fps+" 帧");}});
             };
-            session.Video=frame=>{if(contentVisible){System.Threading.Interlocked.Increment(ref receivedFrames);timeline.Observe(frame.Timestamp);decoder.Enqueue(frame);}};
+            session.Video=frame=>{if(contentVisible){System.Threading.Interlocked.Increment(ref receivedFrames);sourceTiming.Observe(frame.Timestamp);timeline.Observe(frame.Timestamp);decoder.Enqueue(frame);}};
             session.TimedAudio=(timestamp,data)=>{if(contentVisible)audioPlayback.Add(timestamp,data);};
             session.Sharing=visible=>{
                 if(companion!=session)return;
-                contentVisible=visible; decoder.Reset(); audioPlayback.Reset();
+                contentVisible=visible; decoder.Reset(); audioPlayback.Reset(); sourceTiming.Reset();
                 lock(decodedLock){while(decoded.Count>0)decoded.Dequeue().Dispose();}
                 Ui(()=>{if(companion!=session || contentVisible!=visible)return;
                     shownFrames=0;System.Threading.Interlocked.Exchange(ref receivedFrames,0);System.Threading.Interlocked.Exchange(ref decodedFrames,0);statsWindows=0;lastSubmit=0;skippedVideoFrames=busyVideoFrames=0;submitMilliseconds=maxSubmitMilliseconds=maxSubmitGap=0;playbackStats.Restart();
-                    if(pendingVideoFrame!=null){pendingVideoFrame.Dispose();pendingVideoFrame=null;}videoBitmap=null; Get<System.Windows.Controls.Image>("CompanionImage").Source=null;
+                    if(pendingVideoFrame!=null){pendingVideoFrame.Dispose();pendingVideoFrame=null;}videoBitmap=null; crop.Display(null);
                     Get<System.Windows.Controls.Image>("CompanionImage").Visibility=visible?Visibility.Visible:Visibility.Collapsed;
                     Get<StackPanel>("EmptyState").Visibility=visible?Visibility.Collapsed:Visibility.Visible;
                     Text("EmptyTitle","等待手机端打开红果短剧");Text("EmptyHint","连接已保留，打开红果后自动恢复播放");
@@ -291,7 +291,7 @@ namespace HongguoRemote
                 try {
                     BitmapImage frame=new BitmapImage();
                     using (var data=new MemoryStream(bytes)) { frame.BeginInit(); frame.CacheOption=BitmapCacheOption.OnLoad; frame.StreamSource=data; frame.EndInit(); frame.Freeze(); }
-                    Ui(()=> { try { if(companion==session && contentVisible) Get<System.Windows.Controls.Image>("CompanionImage").Source=frame; } finally { System.Threading.Interlocked.Exchange(ref framePending,0); } });
+                    Ui(()=> { try { if(companion==session && contentVisible) crop.Display(frame); } finally { System.Threading.Interlocked.Exchange(ref framePending,0); } });
                 } catch { System.Threading.Interlocked.Exchange(ref framePending,0); throw; }
             };
             session.Audio=bytes=> { if(companion==session && contentVisible && !audioFailed) try { sound.Play(bytes); } catch(Exception e) {audioFailed=true; Ui(()=>SetStatus(e.Message));} };
@@ -311,18 +311,13 @@ namespace HongguoRemote
             if(frame!=null){
                 try{
                     if(mediaClock.Delay(frame.Timestamp)>=-150){
-                        if(videoBitmap==null||videoBitmap.PixelWidth!=frame.Width||videoBitmap.PixelHeight!=frame.Height){videoBitmap=new WriteableBitmap(frame.Width,frame.Height,96,96,System.Windows.Media.PixelFormats.Bgr32,null);Get<System.Windows.Controls.Image>("CompanionImage").Source=videoBitmap;}
+                        if(videoBitmap==null||videoBitmap.PixelWidth!=frame.Width||videoBitmap.PixelHeight!=frame.Height){videoBitmap=new WriteableBitmap(frame.Width,frame.Height,96,96,System.Windows.Media.PixelFormats.Bgr32,null);crop.Display(videoBitmap);}
                         long submitStarted=Stopwatch.GetTimestamp();
                         // Bound UI waiting; retain the newest due frame if the compositor is still busy.
-                        if(videoBitmap.TryLock(new Duration(TimeSpan.FromMilliseconds(2)))){
-                            try{
-                                int stride=frame.Width*4;
-                                if(videoBitmap.BackBufferStride==stride)System.Runtime.InteropServices.Marshal.Copy(frame.Pixels,0,videoBitmap.BackBuffer,frame.Pixels.Length);
-                                else for(int row=0;row<frame.Height;row++)System.Runtime.InteropServices.Marshal.Copy(frame.Pixels,row*stride,IntPtr.Add(videoBitmap.BackBuffer,row*videoBitmap.BackBufferStride),stride);
-                                videoBitmap.AddDirtyRect(new Int32Rect(0,0,frame.Width,frame.Height));shownFrames++;
-                                if(lastSubmit!=0)maxSubmitGap=Math.Max(maxSubmitGap,(submitStarted-lastSubmit)*1000.0/Stopwatch.Frequency);
-                                lastSubmit=submitStarted;
-                            }finally{videoBitmap.Unlock();}
+                        if(crop.Present(frame)){
+                            frame=null;shownFrames++;
+                            if(lastSubmit!=0)maxSubmitGap=Math.Max(maxSubmitGap,(submitStarted-lastSubmit)*1000.0/Stopwatch.Frequency);
+                            lastSubmit=submitStarted;
                             double elapsed=(Stopwatch.GetTimestamp()-submitStarted)*1000.0/Stopwatch.Frequency;
                             submitMilliseconds+=elapsed;maxSubmitMilliseconds=Math.Max(maxSubmitMilliseconds,elapsed);
                         }else {busyVideoFrames++;pendingVideoFrame=frame;frame=null;}
@@ -332,9 +327,10 @@ namespace HongguoRemote
             if(playbackStats.ElapsedMilliseconds>=1000){
                 double seconds=playbackStats.Elapsed.TotalSeconds;
                 string stats="接收 "+(System.Threading.Interlocked.Exchange(ref receivedFrames,0)/seconds).ToString("F0")+" · 解码 "+(System.Threading.Interlocked.Exchange(ref decodedFrames,0)/seconds).ToString("F0")+" · 播放 "+(shownFrames/seconds).ToString("F0")+" 帧/秒";
+                string sourceStats=sourceTiming.TakeSummary();
                 Text("PlaybackFps",stats);
                 if(++statsWindows==1 || (DateTime.UtcNow-previousVideoPerformanceLog).TotalSeconds>=10){
-                    DiagnosticLog.Current.Write("INFO","视频性能 BGR32："+stats+"；跳过 "+skippedVideoFrames+"；合成器忙 "+busyVideoFrames+"；提交平均/最大 "+(submitMilliseconds/Math.Max(1,shownFrames)).ToString("F2")+"/"+maxSubmitMilliseconds.ToString("F2")+"ms；最大提交间隔 "+maxSubmitGap.ToString("F1")+"ms");
+                    DiagnosticLog.Current.Write("INFO","视频性能 BGR32："+stats+"；跳过 "+skippedVideoFrames+"；合成器忙 "+busyVideoFrames+"；提交平均/最大 "+(submitMilliseconds/Math.Max(1,shownFrames)).ToString("F2")+"/"+maxSubmitMilliseconds.ToString("F2")+"ms；最大提交间隔 "+maxSubmitGap.ToString("F1")+"ms；"+sourceStats);
                     previousVideoPerformanceLog=DateTime.UtcNow;
                 }
                 skippedVideoFrames=busyVideoFrames=0;submitMilliseconds=maxSubmitMilliseconds=maxSubmitGap=0;
@@ -347,22 +343,6 @@ namespace HongguoRemote
             if(companion!=null) SendCompanion(next ? "swipe|5000|7200|5000|2800|280" : "swipe|5000|2800|5000|7200|280");
             else Input(()=>bridge.Swipe(activeSerial,next));
         }
-        void SendText()
-        {
-            if(companion==null || !companion.Connected) return;
-            var dark=new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x14,0x15,0x1C));
-            var dialog=new Window {Owner=window,Title="输入到手机",Width=440,Height=240,WindowStartupLocation=WindowStartupLocation.CenterOwner,
-                Background=dark,Foreground=System.Windows.Media.Brushes.White,FontFamily=new System.Windows.Media.FontFamily("Microsoft YaHei UI"),FontSize=13};
-            var layout=new StackPanel {Margin=new Thickness(18)};
-            layout.Children.Add(new TextBlock {Text="先点手机里的搜索框，再输入文字（会替换输入框内容）。",TextWrapping=TextWrapping.Wrap,Foreground=new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xC1,0xC6,0xD4)),LineHeight=20});
-            var entry=new TextBox {Margin=new Thickness(0,12,0,12),MaxLength=2000,Padding=new Thickness(10,8,10,8),
-                Background=new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x1B,0x1D,0x26)),
-                Foreground=System.Windows.Media.Brushes.White,CaretBrush=System.Windows.Media.Brushes.White,
-                BorderBrush=new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x33,0x36,0x44))}; layout.Children.Add(entry);
-            var send=new Button {Content="发送到手机",Padding=new Thickness(8)}; send.Style=window.FindResource("AccentButton") as Style;
-            send.Click+=(s,e)=>{SendCompanion("text|"+entry.Text);dialog.Close();}; layout.Children.Add(send);dialog.Content=layout;dialog.ShowDialog();
-        }
-
         void DiscoveryStatus(string message)
         {
             Text("DiscoveryHint", message); SetStatus(message);
@@ -609,7 +589,7 @@ namespace HongguoRemote
             }
             if (closing) return;
             Text("VideoStats", "高清 · 最高 120 帧");Text("PlaybackFps", "帧率以实际播放为准");
-            Get<System.Windows.Controls.Image>("CompanionImage").Source=null;
+            crop.Display(null);
             Get<System.Windows.Controls.Image>("CompanionImage").Visibility=Visibility.Collapsed;
             Get<Border>("VideoHost").Visibility = Visibility.Collapsed;
             Get<StackPanel>("EmptyState").Visibility = Visibility.Visible;
@@ -626,16 +606,11 @@ namespace HongguoRemote
             catch (Exception e) { if (!closing) SetStatus(e.Message); }
             finally { inputBusy = false; }
         }
-        void SendKey(int key) {
-            if(companion!=null) { if(!contentVisible)return; string command=key==4?"back":key==3?"home":key==24?"volumeup":key==25?"volumedown":"pause"; SendCompanion(command); }
-            else Input(() => bridge.Key(activeSerial, key));
-        }
         void HandleKey(int key)
         {
             if (closing) return;
             if (key == 122) ToggleFullscreen();
             else if (key == 27) { if (fullscreen) ToggleFullscreen(); }
-            else if (key == 32) SendKey(85);
             else if (key == 38 || key == 40) Input(() => bridge.Swipe(activeSerial, key == 40));
         }
         void UpdateLayoutMode()
@@ -684,6 +659,7 @@ namespace HongguoRemote
             UpdateLayoutMode();window.UpdateLayout();ResizeVideo();
             if(video!=IntPtr.Zero)Native.SetFocus(video);
             else Get<System.Windows.Controls.Image>("CompanionImage").Focus();
+            if(fullscreen && companion!=null && contentVisible && crop.NeedsAutomaticCrop) crop.Edit(true);
         }
         void UpdateControls()
         {
@@ -693,8 +669,6 @@ namespace HongguoRemote
             Get<ComboBox>("Devices").IsEnabled = !busy && !Running;
             Get<ComboBox>("Quality").IsEnabled = !Running;
             Get<CheckBox>("Audio").IsEnabled = !Running;
-            foreach (string name in new[] { "Pause", "Back" }) Get<Button>(name).IsEnabled = Running && Controllable;
-            Get<Button>("SendText").IsEnabled=companion!=null && Controllable;
             Get<ComboBox>("CompanionChoices").IsEnabled=!busy && !Running;
             Get<System.Windows.Shapes.Ellipse>("StatusDot").Fill = (Controllable || contentVisible) ? DotLive : (Running ? DotWait : DotIdle);
         }
@@ -738,7 +712,7 @@ namespace HongguoRemote
                 Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x14, 0x15, 0x1C)),
                 Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE4, 0xE5, 0xED)),
                 BorderThickness = new Thickness(0), Padding = new Thickness(4) };
-            box.Text = "首次使用\r\n1. 手机上开启 USB 调试，用数据线连接，在手机弹窗中允许调试。\r\n2. 点击刷新设备，选择已就绪的手机，打开手机上的红果，再开始投屏。\r\n3. 鼠标点击和拖动对应手机触摸。观看快捷键开启时，画面内滚轮/↑↓发送滑动；搜索选集时关闭观看快捷键。\r\n4. 中文可在电脑复制，在手机输入框聚焦后 Ctrl+V 粘贴；不自动同步手机剪贴板。\r\n\r\n红米 / 小米\r\n若能显示不能点击，请检查开发者选项中的「USB 调试（安全设置）」，按系统要求授权。\r\n没有 USB 提示时，先换支持数据传输的线和电脑 USB 口。\r\n\r\n无线 / 热点\r\n电脑与手机在同一网络。Android 11+ 的无线调试中，先用配对码弹窗的地址配对，再用无线调试主页面的地址连接；两个端口通常不同。热点是否支持无线调试由手机系统决定。\r\n不支持配对时，可先接 USB，点 USB 转无线，再输入手机 IP:5555 连接。无线连接成功后才拔线。结束后可点恢复 USB 模式关闭 5555；无线调试开关需在手机设置中关闭。\r\n\r\n注意\r\n播放/暂停发送安卓媒体键，不保证红果所有页面响应，无响应请点视频内按钮。快捷滑动不等于保证切换下一集。账号、选集、收藏和付费仍由手机红果处理。音频与受保护画面以手机和应用实际支持为准。\r\n本工具是本地遥控工具，非红果官方客户端。\r\n\r\n诊断（仅本次会话，不含配对码）\r\n" + logs;
+            box.Text = "首次使用\r\n1. 手机上开启 USB 调试，用数据线连接，在手机弹窗中允许调试。\r\n2. 点击刷新设备，选择已就绪的手机，打开手机上的红果，再开始投屏。\r\n3. 鼠标点击和拖动对应手机触摸。观看快捷键开启时，画面内滚轮/↑↓发送滑动；搜索选集时关闭观看快捷键。\r\n4. 中文可在电脑复制，在手机输入框聚焦后 Ctrl+V 粘贴；不自动同步手机剪贴板。\r\n\r\n红米 / 小米\r\n若能显示不能点击，请检查开发者选项中的「USB 调试（安全设置）」，按系统要求授权。\r\n没有 USB 提示时，先换支持数据传输的线和电脑 USB 口。\r\n\r\n无线 / 热点\r\n电脑与手机在同一网络。Android 11+ 的无线调试中，先用配对码弹窗的地址配对，再用无线调试主页面的地址连接；两个端口通常不同。热点是否支持无线调试由手机系统决定。\r\n不支持配对时，可先接 USB，点 USB 转无线，再输入手机 IP:5555 连接。无线连接成功后才拔线。结束后可点恢复 USB 模式关闭 5555；无线调试开关需在手机设置中关闭。\r\n\r\n注意\r\n播放操作请点击手机画面内的按钮。快捷滑动不等于保证切换下一集。账号、选集、收藏和付费仍由手机红果处理。音频与受保护画面以手机和应用实际支持为准。\r\n本工具是本地遥控工具，非红果官方客户端。\r\n\r\n诊断（仅本次会话，不含配对码）\r\n" + logs;
             box.Text = "热点 / Wi-Fi 快捷连接（推荐）\r\n电脑连接手机热点后，手机开启无线调试 → 使用配对码配对设备。电脑点「自动查找手机」，找到后只输入 6 位码，配对后自动连接。地址和端口自动发现，不需要手填。\r\n若手机提示必须连接 Wi-Fi，当前系统不支持仅用热点开启无线调试。自动发现依赖手机广播服务；被网络隔离时请查看高级连接。\r\n\r\n" + box.Text;
             box.Text="手机助手模式（无需调试）\r\n手机安装 HongguoCompanion.apk，电脑连手机热点。手机点开始共享，电脑点查找并连接手机，手机允许本次连接。第一次需手动开启无障碍控制。中文请用底部输入文字按钮。声音转发需手机音频授权，且红果允许捕获。\r\n\r\n"+box.Text;
             help.Content = box; help.ShowDialog();

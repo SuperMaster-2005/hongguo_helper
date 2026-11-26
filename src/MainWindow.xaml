@@ -273,9 +273,7 @@
     <WrapPanel x:Name="Toolbar" VerticalAlignment="Center">
      <Button x:Name="ConnectionToggle" Content="连接与设置" Margin="0,0,8,0"/>
      <Button x:Name="Logs" Content="运行日志" Margin="0,0,8,0"/>
-     <Button x:Name="Pause" Content="播放 / 暂停" Margin="0,0,8,0"/>
-     <Button x:Name="Back" Content="返回" Margin="0,0,8,0"/>
-     <Button x:Name="SendText" Content="输入文字" Margin="0,0,8,0"/>
+     <Button x:Name="Crop" Content="画面裁剪 / 重新裁剪" Margin="0,0,8,0"/>
      <Button x:Name="Fullscreen" Content="全屏  F11" Style="{StaticResource AccentButton}" Margin="0"/>
     </WrapPanel>
     <DockPanel Margin="0,8,0,0">

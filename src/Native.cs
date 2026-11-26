@@ -79,7 +79,7 @@ namespace HongguoRemote
                     if (up && held.Remove(key)) return new IntPtr(1);
                     bool modified = (GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0 || (GetAsyncKeyState(0x10) & 0x8000) != 0;
                     if (!up && !modified && Target != null && PlaybackFocused(Target()) &&
-                        (key == 122 || key == 27 || (Watch() && (key == 32 || key == 38 || key == 40))))
+                        (key == 122 || key == 27 || (Watch() && (key == 38 || key == 40))))
                     {
                         if (held.Add(key) && Key != null) Key(key);
                         return new IntPtr(1);
