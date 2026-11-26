@@ -3,6 +3,10 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -96,7 +100,7 @@ namespace HongguoRemote
 
         sealed class Pipeline : IDisposable
         {
-            readonly Process process;
+            readonly BufferedDecoderProcess process;
             readonly VideoFormat format;
             readonly Queue<long> timestamps=new Queue<long>();
             readonly object sync=new object();
@@ -112,9 +116,8 @@ namespace HongguoRemote
             public Pipeline(string exe,VideoFormat value,Action<DecodedFrame> frame,Action<string> error,Action<string> warning)
             {
                 format=value;onFrame=frame;this.error=error;
-                var info=new ProcessStartInfo(exe,"-hide_banner -loglevel error -probesize 32 -analyzeduration 0 -flags low_delay -threads 2 -thread_type slice -f h264 -i pipe:0 -an -sn -filter_threads 2 -threads 1 -flush_packets 1 -fps_mode passthrough -pix_fmt bgr0 -f rawvideo pipe:1") {UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
-                process=new Process{StartInfo=info};process.ErrorDataReceived+=(s,e)=>{if(!closed&&!String.IsNullOrWhiteSpace(e.Data))warning("解码器："+e.Data);};
-                process.Start();process.BeginErrorReadLine();
+                process=new BufferedDecoderProcess(exe,"-hide_banner -loglevel error -probesize 32 -analyzeduration 0 -flags low_delay -threads 2 -thread_type slice -f h264 -i pipe:0 -an -sn -filter_threads 2 -threads 1 -flush_packets 1 -fps_mode passthrough -pix_fmt bgr0 -f rawvideo pipe:1");
+                Task.Run(()=>{try{string line;while((line=process.Error.ReadLine())!=null)if(!closed&&!String.IsNullOrWhiteSpace(line))warning("解码器："+line);}catch(IOException){}catch(ObjectDisposedException){}});
                 writeWatchdog=new Timer(CheckWrite,null,250,250);
                 Task.Run((Action)ReadFrames);
             }
@@ -131,7 +134,7 @@ namespace HongguoRemote
                     }else backlogStarted=0;
                     timestamps.Enqueue(frame.Timestamp);writeStarted=Stopwatch.GetTimestamp();writing=true;
                 }
-                try{process.StandardInput.BaseStream.Write(frame.Data,0,frame.Data.Length);process.StandardInput.BaseStream.Flush();}
+                try{process.Input.Write(frame.Data,0,frame.Data.Length);process.Input.Flush();}
                 catch(Exception){if(writeTimedOut)throw new TimeoutException("视频解码器写入超时。");throw;}
                 finally{lock(sync)writing=false;}
             }
@@ -148,7 +151,7 @@ namespace HongguoRemote
             void ReadFrames()
             {
                 try{
-                    Stream output=process.StandardOutput.BaseStream;
+                    Stream output=process.Output;
                     while(!closed){
                         byte[] pixels;if(!recycled.TryTake(out pixels))pixels=new byte[checked(format.Width*format.Height*4)];int offset=0;
                         while(offset<pixels.Length){int n=output.Read(pixels,offset,pixels.Length-offset);if(n<=0)throw new EndOfStreamException("视频解码器已退出。");offset+=n;}
@@ -160,9 +163,92 @@ namespace HongguoRemote
             public void Dispose(){
                 lock(sync){if(closed)return;closed=true;}
                 writeWatchdog.Dispose();
-                try{if(!process.HasExited)process.Kill();}
-                catch(InvalidOperationException){}
-                catch(System.ComponentModel.Win32Exception e){error("无法结束视频解码器："+e.Message);}
+                try{process.Dispose();}
+                catch(Win32Exception e){error("无法结束视频解码器："+e.Message);}
+            }
+        }
+
+        // Process.Start uses a small anonymous stdout pipe on Windows. A 1080x2400
+        // BGR frame is about 10 MB; give that pipe a bounded 1 MB transfer buffer
+        // instead of forcing thousands of writer/reader switches per frame.
+        sealed class BufferedDecoderProcess : IDisposable
+        {
+            internal readonly Stream Input,Output;
+            internal readonly StreamReader Error;
+            readonly Process child;
+            [StructLayout(LayoutKind.Sequential)]
+            struct SecurityAttributes { internal int Length;internal IntPtr Descriptor;[MarshalAs(UnmanagedType.Bool)]internal bool Inherit; }
+            [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+            struct StartupInfo {
+                internal int Size;internal string Reserved,Desktop,Title;
+                internal int X,Y,Width,Height,CountX,CountY,Fill,Flags;
+                internal short Show,ReservedSize;internal IntPtr ReservedData,Input,Output,Error;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            struct ProcessInfo { internal IntPtr Process,Thread;internal int Id,ThreadId; }
+            [StructLayout(LayoutKind.Sequential)]
+            struct ExtendedStartupInfo { internal StartupInfo Startup;internal IntPtr Attributes; }
+            [DllImport("kernel32.dll",SetLastError=true)]
+            [return:MarshalAs(UnmanagedType.Bool)]
+            static extern bool CreatePipe(out IntPtr read,out IntPtr write,ref SecurityAttributes attributes,int size);
+            [DllImport("kernel32.dll",SetLastError=true)]
+            [return:MarshalAs(UnmanagedType.Bool)]
+            static extern bool SetHandleInformation(IntPtr handle,int mask,int flags);
+            [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+            [return:MarshalAs(UnmanagedType.Bool)]
+            static extern bool CreateProcess(string application,StringBuilder command,IntPtr processAttributes,IntPtr threadAttributes,
+                [MarshalAs(UnmanagedType.Bool)]bool inherit,int flags,IntPtr environment,string directory,ref ExtendedStartupInfo startup,out ProcessInfo info);
+            [DllImport("kernel32.dll",SetLastError=true)]
+            [return:MarshalAs(UnmanagedType.Bool)]
+            static extern bool InitializeProcThreadAttributeList(IntPtr list,int count,int flags,ref IntPtr size);
+            [DllImport("kernel32.dll",SetLastError=true)]
+            [return:MarshalAs(UnmanagedType.Bool)]
+            static extern bool UpdateProcThreadAttribute(IntPtr list,int flags,IntPtr attribute,IntPtr value,IntPtr size,IntPtr previous,IntPtr returnedSize);
+            [DllImport("kernel32.dll")]
+            static extern void DeleteProcThreadAttributeList(IntPtr list);
+            [DllImport("kernel32.dll")]
+            [return:MarshalAs(UnmanagedType.Bool)]
+            static extern bool CloseHandle(IntPtr handle);
+            static void Close(ref IntPtr handle){if(handle!=IntPtr.Zero){CloseHandle(handle);handle=IntPtr.Zero;}}
+            static FileStream Take(ref IntPtr handle,FileAccess access){var safe=new SafeFileHandle(handle,true);handle=IntPtr.Zero;try{return new FileStream(safe,access,4096,false);}catch{safe.Dispose();throw;}}
+            internal BufferedDecoderProcess(string executable,string arguments)
+            {
+                IntPtr inputRead=IntPtr.Zero,inputWrite=IntPtr.Zero,outputRead=IntPtr.Zero,outputWrite=IntPtr.Zero,errorRead=IntPtr.Zero,errorWrite=IntPtr.Zero;
+                var attributes=new SecurityAttributes{Length=Marshal.SizeOf(typeof(SecurityAttributes)),Inherit=true};
+                ProcessInfo info=new ProcessInfo();
+                IntPtr attributeList=IntPtr.Zero,handles=IntPtr.Zero;bool initialized=false;
+                try {
+                    if(!CreatePipe(out inputRead,out inputWrite,ref attributes,4096)||
+                       !CreatePipe(out outputRead,out outputWrite,ref attributes,1024*1024)||
+                       !CreatePipe(out errorRead,out errorWrite,ref attributes,4096)||
+                       !SetHandleInformation(inputWrite,1,0)||!SetHandleInformation(outputRead,1,0)||!SetHandleInformation(errorRead,1,0))throw new Win32Exception(Marshal.GetLastWin32Error());
+                    // Inherit only these three pipe ends, including when other processes
+                    // are being started concurrently by the application.
+                    IntPtr size=IntPtr.Zero;
+                    InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref size);
+                    attributeList=Marshal.AllocHGlobal(size);
+                    if(!InitializeProcThreadAttributeList(attributeList,1,0,ref size))throw new Win32Exception(Marshal.GetLastWin32Error());
+                    initialized=true;handles=Marshal.AllocHGlobal(3*IntPtr.Size);
+                    Marshal.WriteIntPtr(handles,0,inputRead);Marshal.WriteIntPtr(handles,IntPtr.Size,outputWrite);Marshal.WriteIntPtr(handles,2*IntPtr.Size,errorWrite);
+                    if(!UpdateProcThreadAttribute(attributeList,0,new IntPtr(0x20002),handles,new IntPtr(3*IntPtr.Size),IntPtr.Zero,IntPtr.Zero))throw new Win32Exception(Marshal.GetLastWin32Error());
+                    var startup=new ExtendedStartupInfo{Startup=new StartupInfo{Size=Marshal.SizeOf(typeof(ExtendedStartupInfo)),Flags=0x100,Input=inputRead,Output=outputWrite,Error=errorWrite},Attributes=attributeList};
+                    if(!CreateProcess(executable,new StringBuilder("\""+executable+"\" "+arguments),IntPtr.Zero,IntPtr.Zero,true,0x08080000,IntPtr.Zero,null,ref startup,out info))throw new Win32Exception(Marshal.GetLastWin32Error());
+                    child=Process.GetProcessById(info.Id);
+                    Input=Take(ref inputWrite,FileAccess.Write);Output=Take(ref outputRead,FileAccess.Read);
+                    Error=new StreamReader(Take(ref errorRead,FileAccess.Read),Encoding.UTF8);
+                }catch{if(child!=null)Dispose();throw;}
+                finally {
+                    if(initialized)DeleteProcThreadAttributeList(attributeList);
+                    if(attributeList!=IntPtr.Zero)Marshal.FreeHGlobal(attributeList);
+                    if(handles!=IntPtr.Zero)Marshal.FreeHGlobal(handles);
+                    Close(ref inputRead);Close(ref inputWrite);Close(ref outputRead);Close(ref outputWrite);Close(ref errorRead);Close(ref errorWrite);
+                    Close(ref info.Process);Close(ref info.Thread);
+                }
+            }
+            public void Dispose()
+            {
+                try{if(!child.HasExited)child.Kill();}catch(InvalidOperationException){}
+                finally{if(Input!=null)Input.Dispose();if(Output!=null)Output.Dispose();if(Error!=null)Error.Dispose();child.Dispose();}
             }
         }
     }

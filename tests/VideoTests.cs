@@ -23,6 +23,9 @@ static class VideoTests
         CheckDecode(2400,1080,120);
         CheckDecode(1080,2400,120,false,true);
         CheckDecode(2400,1080,120,false,true);
+        CheckDecode(1080,2400,120,false,true,1200);
+        CheckDecode(2400,1080,120,false,true,1200);
+        CheckDecode(1080,2400,30);
         bool invalidRate=false;try {VideoFormat.Parse("H264|1280|720|144");}catch(IOException){invalidRate=true;}
         if(!invalidRate)throw new Exception("Unsupported frame rate accepted");
         bool rejected=false;
@@ -72,19 +75,19 @@ static class VideoTests
         }
         Console.WriteLine("PASS: stalled decoder write times out, restarts at keyframe, delivers frame and cleans up");
     }
-    static void CheckDecode(int width,int height,int fps=60,bool solidRed=false,bool highProfile=false)
+    static void CheckDecode(int width,int height,int fps=60,bool solidRed=false,bool highProfile=false,int frameCount=120)
     {
         string exe = Path.GetFullPath("tools/ffmpeg/ffmpeg.exe");
         string sample = Path.GetFullPath("tests/out/sample60.h264");
-        var info = new ProcessStartInfo(exe, "-hide_banner -loglevel error -y -f lavfi -i "+(solidRed?"color=c=red:size=":"testsrc2=size=")+width+"x"+height+":rate="+fps+" -frames:v 120 -c:v libx264 -preset ultrafast -tune zerolatency "+(highProfile?"-profile:v high -coder 1 -8x8dct 1 ":"")+"-x264-params aud=1:keyint=60:scenecut=0 -f h264 " + ProcessRunner.Quote(sample)) { UseShellExecute=false, CreateNoWindow=true };
+        var info = new ProcessStartInfo(exe, "-hide_banner -loglevel error -y -f lavfi -i "+(solidRed?"color=c=red:size=":"testsrc2=size=")+width+"x"+height+":rate="+fps+" -frames:v "+frameCount+" -c:v libx264 -preset ultrafast -tune zerolatency "+(highProfile?"-profile:v high -coder 1 -8x8dct 1 ":"")+"-x264-params "+(frameCount>120?"slices=1:threads=4:":"")+"aud=1:keyint=60:scenecut=0 -f h264 " + ProcessRunner.Quote(sample)) { UseShellExecute=false, CreateNoWindow=true };
         using(var generator=Process.Start(info)) {
-            if(!generator.WaitForExit(15000) || generator.ExitCode!=0) throw new Exception("H264 fixture generation failed");
+            if(!generator.WaitForExit(30000) || generator.ExitCode!=0) throw new Exception("H264 fixture generation failed");
         }
         byte[] data=File.ReadAllBytes(sample);
         var starts=new List<int>();
         for(int i=0;i+4<data.Length;i++)
             if(data[i]==0 && data[i+1]==0 && data[i+2]==0 && data[i+3]==1 && (data[i+4]&31)==9) starts.Add(i);
-        if(starts.Count!=120) throw new Exception("Expected 120 access units");
+        if(starts.Count!=frameCount) throw new Exception("Unexpected access unit count");
         starts.Add(data.Length);
         int frames=0; string error=null;
         using(var decoder=new H264Decoder(exe)) {
@@ -96,15 +99,15 @@ static class VideoTests
             };
             decoder.Configure(VideoFormat.Parse("H264|"+width+"|"+height+"|"+fps));
             var elapsed=Stopwatch.StartNew();
-            for(int i=0;i<120;i++) {
+            for(int i=0;i<frameCount;i++) {
                 while(elapsed.Elapsed.TotalMilliseconds<i*1000.0/fps) Thread.Sleep(1);
                 byte[] unit=new byte[starts[i+1]-starts[i]];
                 Buffer.BlockCopy(data,starts[i],unit,0,unit.Length);
                 decoder.Enqueue(new EncodedFrame{Data=unit,Timestamp=i*1000000L/fps,Key=i%60==0});
             }
-            SpinWait.SpinUntil(()=>frames>=118 || error!=null,2000);
-            if(error!=null || frames<118) throw new Exception(width+"x"+height+" "+fps+"fps decoder: "+frames+" frames; "+error);
-            Console.WriteLine("PASS: "+width+"x"+height+" "+fps+"fps "+(highProfile?"High Profile ":"")+"real H264 decode, "+frames+"/120 live frames");
+            SpinWait.SpinUntil(()=>frames>=frameCount-2 || error!=null,2000);
+            if(error!=null || frames<frameCount-2) throw new Exception(width+"x"+height+" "+fps+"fps decoder: "+frames+" frames; "+error);
+            Console.WriteLine("PASS: "+width+"x"+height+" "+fps+"fps "+(highProfile?"High Profile ":"")+"real H264 decode, "+frames+"/"+frameCount+" live frames");
         }
     }
 }
